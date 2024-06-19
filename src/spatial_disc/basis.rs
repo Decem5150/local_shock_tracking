@@ -1,1 +1,1 @@
-pub mod lagrange;
+pub mod lagrange1d;
