@@ -1,7 +1,7 @@
 use basis::lagrange1d::LagrangeBasis1DLobatto;
 use flux::flux1d;
-use mesh::mesh1d::Mesh1d;
-use ndarray::{s, Array, Ix1, Ix2, Ix3};
+use mesh::{mesh1d::Mesh1d, BoundaryType};
+use ndarray::{s, Array, Ix1, Ix2};
 use riemann_solver::hllc1d;
 use crate::solver::{FlowParameters, MeshParameters, SolverParameters};
 mod riemann_solver;
@@ -62,14 +62,8 @@ impl<'a> SpatialDisc1dEuler<'a> {
             let irelem = vertex.iedges[1] as usize;
             let left_dofs = solutions.slice(s![ilelem, .., ..]);
             let right_dofs = solutions.slice(s![irelem, .., ..]);
-            let mut left_values: Array<f64, Ix1> = Array::zeros(neq);
-            let mut right_values: Array<f64, Ix1> = Array::zeros(neq);
-            for ivar in 0..neq {
-                for ibasis in 0..nbasis {
-                    left_values[ivar] += left_dofs[ivar] * self.basis.phis_cell_gps[[cell_ngp, ibasis]];
-                    right_values[ivar] += right_dofs[ivar] * self.basis.phis_cell_gps[[0, ibasis]];
-                }
-            }
+            let left_values: Array<f64, Ix1> = left_dofs.slice(s![.., -1]).to_owned();
+            let right_values: Array<f64, Ix1> = right_dofs.slice(s![.., 0]).to_owned();
             let num_flux = match hllc1d(&left_values, &right_values,&self.flow_param.hcr) {
                     Ok(flux) => flux,
                     Err(e) => {
@@ -92,6 +86,35 @@ impl<'a> SpatialDisc1dEuler<'a> {
         let neq = self.solver_param.number_of_equations;
         let nbasis = cell_ngp;
         let cell_weights = &self.basis.cell_gauss_weights;
-        for ielem in self.mesh.in
+        for boundary_patch in self.mesh.boundary_patches.iter() {
+            let boundary_vertex = &self.mesh.vertices[boundary_patch.ivertex];
+            let iinrelem = boundary_vertex.iedges[0];
+            let boundary_type = &boundary_patch.boundary_type;
+            let (left_values, iphi, normal) = {
+                if boundary_vertex.in_edge_indices[0] == 0 {
+                    (solutions.slice(s![iinrelem, .., 0]), 0, -1.0)
+                } else {
+                    (solutions.slice(s![iinrelem, .., -1]), nbasis - 1, 1.0)
+                }
+            };
+            match boundary_type {
+                BoundaryType::Wall => {
+                    let pressure = (self.flow_param.hcr - 1.0) * (left_values[2] - 0.5 * (left_values[1] * left_values[1]) / left_values[0]);
+                    let boundary_inviscid_flux = [
+                        0.0,
+                        pressure * normal,
+                        0.0,
+                    ];
+                    for ivar in 0..neq {
+                        for ibasis in 0..nbasis {
+                            residuals[[iinrelem, ivar, ibasis]] -= cell_weights[ibasis] * boundary_inviscid_flux[ivar] * self.basis.phis_cell_gps[[iphi, ibasis]];
+                        }
+                    }
+                }
+                BoundaryType::FarField => {
+                    
+                }
+            }
+        }
     }
 }

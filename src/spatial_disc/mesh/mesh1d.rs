@@ -25,7 +25,7 @@ pub struct Mesh1d {
     pub internal_element_indices: Array<usize, Ix1>,
     pub boundary_element_indices: Array<usize, Ix1>,
     pub vertices: Array<Vertex, Ix1>,
-    pub patches: Array<BoundaryPatch1d, Ix1>,
+    pub boundary_patches: Array<BoundaryPatch1d, Ix1>,
 }
 impl Mesh1d {
     pub fn compute_jacob_det(&mut self) {
