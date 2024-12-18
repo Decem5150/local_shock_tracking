@@ -1,7 +1,7 @@
 use ndarray::{array, Array, Ix1};
 
-pub fn get_lobatto_points_interval(number_of_points: usize) -> (Array<f64, Ix1>, Array<f64, Ix1>) {
-    let (gauss_points, gauss_weights) = match number_of_points {
+pub fn get_lobatto_points_interval(points_num: usize) -> (Array<f64, Ix1>, Array<f64, Ix1>) {
+    let (gauss_points, gauss_weights) = match points_num {
         3 => {
             let points = array![- 1.0, 0.0, 1.0];
             let weights = array![1.0 / 3.0, 4.0 / 3.0, 1.0 / 3.0];

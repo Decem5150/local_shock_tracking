@@ -2,17 +2,17 @@ pub struct SolverParameters {
     pub cfl: f64,
     pub final_time: f64,
     pub final_step: usize,
-    pub number_of_cell_gp: usize,
-    pub number_of_edge_gp: usize,
-    pub number_of_equations: usize,
-    pub number_of_basis_functions: usize,
-    pub order_of_polynomials: usize,
+    pub cell_gp_num: usize,
+    pub edge_gp_num: usize,
+    pub equation_num: usize,
+    pub basis_num: usize,
+    pub polynomial_order: usize,
 }
 pub struct MeshParameters {
-    pub number_of_elements: usize,
-    pub number_of_edges: usize,
-    pub number_of_vertices: usize,
-    pub number_of_patches: usize,
+    pub elem_num: usize,
+    pub edge_num: usize,
+    pub node_num: usize,
+    pub patch_num: usize,
 }
 pub struct FlowParameters {
     pub hcr: f64,
