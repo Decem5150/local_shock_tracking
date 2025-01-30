@@ -1,6 +1,6 @@
-mod spatial_disc;
-mod temporal_disc;
 mod solver;
+mod disc;
+mod temporal_disc;
 fn main() {
-    println!("Hello, world!");
+    println!("Hello, World!");
 }
