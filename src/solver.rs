@@ -29,7 +29,6 @@ pub struct Solver<'a, T>
 where
     T: Disc,
 {
-    pub residuals: Array<f64, Ix3>,
     pub solutions: Array<f64, Ix3>,
     pub disc: T,
     pub flow_param: &'a FlowParameters,

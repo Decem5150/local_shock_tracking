@@ -1,6 +1,6 @@
-use ndarray::Array1;
+use ndarray::{Array1, ArrayView1};
 
-pub fn rusanov(ul: &Array1<f64>, ur: &Array1<f64>) -> Array1<f64> {
+pub fn rusanov(ul: ArrayView1<f64>, ur: ArrayView1<f64>) -> Array1<f64> {
     // Physical flux function for Burgers equation: f(u) = u²/2
     let fl = 0.5 * ul * ul;
     let fr = 0.5 * ur * ur;
