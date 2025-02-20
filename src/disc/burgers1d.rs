@@ -15,9 +15,8 @@ pub struct Disc1dBurgers<'a> {
     pub residuals: Array3<f64>, // (nelem, idof, neq)
     pub current_time: f64,
     pub current_step: usize,
-    pub gauss_points: GaussPoints1d,
     pub basis: LagrangeBasis1D,
-    pub mesh: Mesh1d,
+    pub mesh: &'a Mesh1d,
     pub flow_param: &'a FlowParameters,
     pub mesh_param: &'a MeshParameters,
     pub solver_param: &'a SolverParameters,
@@ -32,9 +31,8 @@ pub struct Disc1dBurgers<'a> {
 }
 impl<'a> Disc1dBurgers<'a> {
     fn new(
-        gauss_points: GaussPoints1d,
         basis: LagrangeBasis1D,
-        mesh: Mesh1d,
+        mesh: &'a Mesh1d,
         flow_param: &'a FlowParameters,
         mesh_param: &'a MeshParameters,
         solver_param: &'a SolverParameters,
@@ -55,7 +53,6 @@ impl<'a> Disc1dBurgers<'a> {
             residuals,
             current_time: 0.0,
             current_step: 0,
-            gauss_points,
             basis,
             mesh,
             flow_param,
