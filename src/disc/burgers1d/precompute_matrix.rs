@@ -132,7 +132,7 @@ impl<'a> Disc1dBurgers<'a> {
                 k1_mat[[i, j]] = f1_mat[[i, j]] - t_mat[[i, j]];
             }
         }
-        self.ik1_mat = k1_mat.inv().unwrap();
+        self.stst_ik1_mat = k1_mat.inv().unwrap();
     }
     pub fn compute_f0_mat(&mut self) {
         let cell_ngp = self.solver_param.cell_gp_num;
@@ -152,7 +152,7 @@ impl<'a> Disc1dBurgers<'a> {
                            self.basis.phis_cell_gps[(k_x, jx)] * 
                            self.basis.phis_cell_gps[(0, jt)]; // Evaluate temporal basis at t=0
                 }
-                self.f0_mat[[i, j]] = sum;
+                self.stst_f0_mat[[i, j]] = sum;
             }
         }
     }
