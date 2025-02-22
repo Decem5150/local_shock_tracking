@@ -7,7 +7,7 @@ use crate::{
 pub fn initialize_params() -> (FlowParameters, SolverParameters) {
     let solver_param_parser = SolverParamParser::parse("input/solverparam.json");
     let polynomial_order = solver_param_parser.polynomial_order;
-    let cell_gp_num = polynomial_order + 1;
+    let cell_gp_num = (polynomial_order + 3) / 2;
     let mut solver_params = SolverParameters {
         cfl: solver_param_parser.cfl,
         final_time: solver_param_parser.final_time,

@@ -12,8 +12,10 @@ pub struct LagrangeBasis1D {
 }
 
 pub struct LagrangeBasis1DLobatto {
-    pub dphis_cell_gps: Array<HashMap<usize, f64>, Ix2>,
-    // ... other fields
+    pub cell_gauss_points: Array<f64, Ix1>,
+    pub cell_gauss_weights: Array<f64, Ix1>,
+    pub phis_cell_gps: Array<f64, Ix2>,
+    pub dphis_cell_gps: Array<f64, Ix2>,
 }
 
 impl LagrangeBasis1D {
@@ -105,6 +107,50 @@ impl LagrangeBasis1D {
             dphis_cell_gps,
             phis_bnd_gps,
             dphis_bnd_gps,
+        }
+    }
+}
+
+impl LagrangeBasis1DLobatto {
+    pub fn new(cell_gp_num: usize) -> LagrangeBasis1DLobatto {
+        let dofs = cell_gp_num;
+        let (cell_gauss_points, cell_gauss_weights) = get_lobatto_points_interval(dofs);
+        let mut phis_cell_gps = Array::zeros((dofs, dofs));
+        let mut dphis_cell_gps = Array::zeros((dofs, dofs));
+        // Compute the basis functions at the gauss points
+        for i in 0..dofs {
+            for j in 0..dofs {
+                phis_cell_gps[(i, j)] = if i == j { 1.0 } else { 0.0 };
+            }
+        }
+        // Compute the derivatives of the basis functions at the gauss points
+        for j in 0..dofs {
+            // loop over basis functions
+            for i in 0..dofs {
+                // loop over gauss points
+                let mut derivative = 0.0;
+                for k in 0..dofs {
+                    // loop over gauss points
+                    if k != j {
+                        let mut product = 1.0;
+                        for m in 0..dofs {
+                            // loop over gauss points
+                            if m != j && m != k {
+                                product *= (cell_gauss_points[i] - cell_gauss_points[m])
+                                    / (cell_gauss_points[j] - cell_gauss_points[m]);
+                            }
+                        }
+                        derivative += product / (cell_gauss_points[j] - cell_gauss_points[k]);
+                    }
+                }
+                dphis_cell_gps[(i, j)] = derivative;
+            }
+        }
+        LagrangeBasis1DLobatto {
+            cell_gauss_points,
+            cell_gauss_weights,
+            phis_cell_gps,
+            dphis_cell_gps,
         }
     }
 }
