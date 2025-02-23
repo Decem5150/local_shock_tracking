@@ -14,8 +14,8 @@ pub struct LagrangeBasis1D {
 pub struct LagrangeBasis1DLobatto {
     pub cell_gauss_points: Array<f64, Ix1>,
     pub cell_gauss_weights: Array<f64, Ix1>,
-    pub phis_cell_gps: Array<f64, Ix2>,
-    pub dphis_cell_gps: Array<f64, Ix2>,
+    pub phis_cell_gps: Array<f64, Ix2>, // (ngp, nbasis)
+    pub dphis_cell_gps: Array<f64, Ix2>, // (ngp, nbasis)
 }
 
 impl LagrangeBasis1D {

@@ -4,7 +4,7 @@ mod flux;
 mod precompute_matrix;
 mod riemann_solver;
 mod shock_tracking;
-use super::{basis::lagrange1d::LagrangeBasis1D, mesh::mesh1d::Mesh1d};
+use super::{basis::lagrange1d::LagrangeBasis1DLobatto, mesh::mesh1d::Mesh1d};
 use crate::solver::{FlowParameters, SolverParameters};
 use boundary_condition::{BoundaryQuantity1d, BoundaryType};
 use flux::flux1d;
@@ -18,10 +18,10 @@ pub struct Disc1dBurgers<'a> {
     pub residuals: Array3<f64>, // (nelem, idof, neq)
     pub current_time: f64,
     pub current_step: usize,
-    pub basis: LagrangeBasis1D,
-    pub mesh: &'a Mesh1d,
-    pub flow_param: &'a FlowParameters,
-    pub solver_param: &'a SolverParameters,
+    pub basis: LagrangeBasis1DLobatto,
+    mesh: &'a Mesh1d,
+    flow_param: &'a FlowParameters,
+    solver_param: &'a SolverParameters,
     ss_m_mat: Array2<f64>,     // mass matrix of two space polynomials
     ss_im_mat: Array2<f64>,    // inverse mass matrix of two space polynomials
     sst_kxi_mat: Array2<f64>, // spatial stiffness matrix of space polynomial and space-time polynomial
@@ -33,7 +33,7 @@ pub struct Disc1dBurgers<'a> {
 }
 impl<'a> Disc1dBurgers<'a> {
     pub fn new(
-        basis: LagrangeBasis1D,
+        basis: LagrangeBasis1DLobatto,
         mesh: &'a Mesh1d,
         flow_param: &'a FlowParameters,
         solver_param: &'a SolverParameters,
@@ -74,7 +74,7 @@ impl<'a> Disc1dBurgers<'a> {
 
         disc
     }
-    fn solve(&mut self, solutions: &Array3<f64>) {
+    fn solve(&self, solutions: &Array3<f64>) {
         let nelem = self.mesh.elem_num;
         let nnode = self.mesh.node_num;
         let cell_ngp = self.solver_param.cell_gp_num;
@@ -102,8 +102,8 @@ impl<'a> Disc1dBurgers<'a> {
                 let node = &self.mesh.nodes[inode];
                 let ilelem = node.parent_elements[0];
                 let irelem = node.parent_elements[1];
-                let left_bnd_lqh: ArrayView2<f64> = bnd_lqh.slice(s![ilelem, 1, .., ..]);
-                let right_bnd_lqh: ArrayView2<f64> = bnd_lqh.slice(s![irelem, 0, .., ..]);
+                let left_bnd_lqh: ArrayView2<f64> = lqh.slice(s![ilelem, cell_ngp - 1, .., ..]);
+                let right_bnd_lqh: ArrayView2<f64> = lqh.slice(s![irelem, 0, .., ..]);
                 let left_res: ArrayViewMut2<f64> = self.residuals.slice_mut(s![ilelem, .., ..]);
                 let right_res: ArrayViewMut2<f64> = self.residuals.slice_mut(s![irelem, .., ..]);
                 self.edge_integral(left_bnd_lqh, right_bnd_lqh, left_res, right_res);
@@ -113,27 +113,42 @@ impl<'a> Disc1dBurgers<'a> {
                 let boundary_type = self.mesh.boundary_patches[ipatch].boundary_type;
                 let inode = self.mesh.boundary_patches[ipatch].inode;
                 let node = &self.mesh.nodes[inode];
+                let weights = &self.basis.cell_gauss_weights;
                 for (iparent, &ielem) in node.parent_elements.indexed_iter() {
                     if ielem != -1 {
                         let ielem = ielem as usize;
                         let local_id = node.local_ids[iparent];
-                        let bnd_lqh_slice: ArrayView2<f64> =
-                            bnd_lqh.slice(s![ielem, local_id, .., ..]);
+                        let bnd_lqh: ArrayView2<f64> = match local_id {
+                            0 => lqh.slice(s![ielem, 0, .., ..]),
+                            1 => lqh.slice(s![ielem, cell_ngp - 1, .., ..]),
+                            _ => unreachable!(),
+                        };
                         match boundary_type {
                             BoundaryType::Dirichlet => {
                                 let boundary_quantity = self.mesh.boundary_patches[ipatch]
                                     .boundary_quantity
                                     .unwrap();
-                                for igp in 0..cell_ngp {
-                                    let boundary_flux: Array1<f64> = rusanov(
-                                        bnd_lqh_slice.slice(s![igp, ..]),
-                                        Array1::from_vec(vec![boundary_quantity.u; cell_ngp])
-                                            .view(),
-                                    );
+                                for ibasis in 0..cell_ngp {
+                                    for kgp in 0..cell_ngp {
+                                        let interior_value: ArrayView1<f64> = bnd_lqh.slice(s![kgp, ..]);
+                                        let boundary_flux: Array1<f64> = rusanov(
+                                            interior_value,
+                                            Array1::from_vec(vec![boundary_quantity.u; cell_ngp])
+                                                .view(),
+                                        );
+                                        match local_id {
+                                            0 => self.residuals[[ielem, ibasis, 0]] -= weights[kgp] * boundary_flux[0] * self.basis.phis_cell_gps[[cell_ngp - 1, ibasis]],
+                                            1 => self.residuals[[ielem, ibasis, 0]] -= weights[kgp] * boundary_flux[0] * self.basis.phis_cell_gps[[0, ibasis]],
+                                            _ => unreachable!(),
+                                        }
+                                    }
                                 }
                             }
                             BoundaryType::Neumann => {}
                         }
+                    }
+                    else {
+                        continue;
                     }
                 }
             }
@@ -164,9 +179,7 @@ impl<'a> Disc1dBurgers<'a> {
                     old_sol.view()
                 };
                 let candidate_sol: ArrayView2<f64> = solutions.slice(s![ielem, .., ..]);
-                if self
-                    .cell_shock_detector
-                    .detect_shock(old_sol, candidate_sol)
+                if self.detect_shock(old_sol, candidate_sol)
                 {
                     // left for shock tracking
                 }
@@ -198,7 +211,7 @@ impl<'a> Disc1dBurgers<'a> {
         time_step
     }
     fn local_space_time_predictor(
-        &self,
+        &mut self,
         mut lqh: ArrayViewMut3<f64>, // (cell_ngp, cell_ngp, neq)
         sol: ArrayView2<f64>,          // (ndof, neq)
         dt: f64,
@@ -282,14 +295,18 @@ impl<'a> Disc1dBurgers<'a> {
         mut left_res: ArrayViewMut2<f64>,  // (nxdof, neq)
         mut right_res: ArrayViewMut2<f64>, // (nxdof, neq)
     ) {
-        let nbasis = self.solver_param.cell_gp_num;
+        let cell_ngp = self.solver_param.cell_gp_num;
+        let nbasis = cell_ngp;
+        let weights = &self.basis.cell_gauss_weights;
         for ibasis in 0..nbasis {
-            let left_value: ArrayView1<f64> = left_bnd_lqh.slice(s![ibasis, ..]);
-            let right_value: ArrayView1<f64> = right_bnd_lqh.slice(s![ibasis, ..]);
-            let num_flux: Array1<f64> = rusanov(left_value, right_value);
-            for ivar in 0..1 {
-                left_res[[ibasis, ivar]] -= num_flux[ivar] * self.basis.phis_bnd_gps[[1, ibasis]];
-                right_res[[ibasis, ivar]] += num_flux[ivar] * self.basis.phis_bnd_gps[[0, ibasis]];
+            for kgp in 0..cell_ngp {
+                let left_value: ArrayView1<f64> = left_bnd_lqh.slice(s![kgp, ..]);
+                let right_value: ArrayView1<f64> = right_bnd_lqh.slice(s![kgp, ..]);
+                let num_flux: Array1<f64> = rusanov(left_value, right_value);
+                for ivar in 0..1 {
+                    left_res[[ibasis, ivar]] -= weights[kgp] * num_flux[ivar] * self.basis.phis_cell_gps[[cell_ngp - 1, ibasis]];
+                    right_res[[ibasis, ivar]] += weights[kgp] * num_flux[ivar] * self.basis.phis_cell_gps[[0, ibasis]];
+                }
             }
         }
     }

@@ -4,14 +4,13 @@ use super::Disc1dBurgers;
 
 impl<'a> Disc1dBurgers<'a> {
     pub fn detect_shock(&self, old_sol: ArrayView3<f64>, candidate_sol: ArrayView2<f64>) -> bool {
-        let mut detected_shock = false;
-        detected_shock = !self.numerical_admissibility_detection(old_sol, candidate_sol);
+        let detected_shock = !self.numerical_admissibility_detection(old_sol, candidate_sol);
         detected_shock
     }
     fn numerical_admissibility_detection(&self, old_sol: ArrayView3<f64>, candidate_sol: ArrayView2<f64>) -> bool {
         let ndof = self.solver_param.cell_gp_num;
-        let delta0 = 1e-4;
-        let epsilon = 1e-3;
+        let delta0: f64 = 1e-4;
+        let epsilon: f64 = 1e-3;
 
         let mut max_sol = old_sol[[0, 0, 0]];
         let mut min_sol = old_sol[[0, 0, 0]];
