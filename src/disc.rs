@@ -3,19 +3,12 @@ pub mod boundary_conditions;
 pub mod flux;
 pub mod gauss_points;
 pub mod mesh;
-pub mod riemann_solver;
+// pub mod riemann_solver;
 pub mod burgers1d;
-pub mod euler1d;
+// pub mod euler1d;
 
-use crate::solver::{FlowParameters, MeshParameters, SolverParameters};
-use crate::disc::basis::lagrange1d::LagrangeBasis1D;
-use flux::flux1d;
-use gauss_points::GaussPoints1d;
-use mesh::{mesh1d::Mesh1d, BoundaryType};
-use ndarray::{s, Array, Array3, ArrayView2, ArrayView3, Ix1, Ix2, Ix3};
-use ndarray_linalg::Inverse;
-use riemann_solver::hllc1d;
 
+/*
 pub struct Disc1dEuler<'a> {
     pub current_time: f64,
     pub current_step: usize,
@@ -393,3 +386,4 @@ impl<'a> Disc1dEuler<'a> {
         }
     }
 }
+*/

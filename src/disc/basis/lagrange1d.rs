@@ -1,6 +1,8 @@
-use super::super::gauss_points::legendre_points::get_legendre_points_interval;
+use crate::disc::gauss_points::{
+    lobatto_points::get_lobatto_points_interval,
+    legendre_points::get_legendre_points_interval,
+};
 use ndarray::{Array, Ix1, Ix2};
-use std::collections::HashMap;
 
 pub struct LagrangeBasis1D {
     pub cell_gauss_points: Array<f64, Ix1>,

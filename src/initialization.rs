@@ -1,5 +1,7 @@
+use ndarray::Array3;
+
 use crate::{
-    disc::{basis::lagrange1d::LagrangeBasis1D, burgers1d::Disc1dBurgers, mesh::mesh1d::Mesh1d},
+    disc::{basis::lagrange1d::{LagrangeBasis1D, LagrangeBasis1DLobatto}, mesh::mesh1d::Mesh1d},
     io::params_parser::SolverParamParser,
     solver::{FlowParameters, Solver, SolverParameters},
 };
@@ -8,7 +10,7 @@ pub fn initialize_params() -> (FlowParameters, SolverParameters) {
     let solver_param_parser = SolverParamParser::parse("input/solverparam.json");
     let polynomial_order = solver_param_parser.polynomial_order;
     let cell_gp_num = (polynomial_order + 3) / 2;
-    let mut solver_params = SolverParameters {
+    let solver_params = SolverParameters {
         cfl: solver_param_parser.cfl,
         final_time: solver_param_parser.final_time,
         final_step: solver_param_parser.final_step,
@@ -19,21 +21,20 @@ pub fn initialize_params() -> (FlowParameters, SolverParameters) {
     let flow_params = FlowParameters { hcr: 1.4 };
     (flow_params, solver_params)
 }
-pub fn initialize_basis(cell_gp_num: usize) -> LagrangeBasis1D {
-    let basis = LagrangeBasis1D::new(cell_gp_num);
+pub fn initialize_basis(cell_gp_num: usize) -> LagrangeBasis1DLobatto {
+    let basis = LagrangeBasis1DLobatto::new(cell_gp_num);
     basis
 }
 pub fn initialize_mesh1d(node_num: usize, left_coord: f64, right_coord: f64) -> Mesh1d {
-    let mut mesh = Mesh1d::new(node_num, left_coord, right_coord);
+    let mesh = Mesh1d::new(node_num, left_coord, right_coord);
     mesh
 }
 pub fn initialize_solver<'a>(
     mesh: &'a Mesh1d,
-    basis: LagrangeBasis1D,
-    flow_param: FlowParameters,
-    solver_param: SolverParameters,
+    basis: LagrangeBasis1DLobatto,
+    flow_param: &'a FlowParameters,
+    solver_param: &'a SolverParameters,
 ) -> Solver<'a> {
-    let disc = Disc1dBurgers::new(basis, mesh, &flow_param, &solver_param);
-    let solver = Solver::new(disc, mesh, flow_param, solver_param);
+    let solver = Solver::new(basis, mesh, flow_param, solver_param);
     solver
 }

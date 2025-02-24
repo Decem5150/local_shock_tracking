@@ -11,5 +11,6 @@ fn main() {
     let left_coord = - 1.0;
     let right_coord = 1.0;
     let mesh = initialize_mesh1d(node_num, left_coord, right_coord);
-    let mut solver = initialization::initialize_solver(&mesh, basis, flow_params, solver_params);
+    let mut solver = initialization::initialize_solver(&mesh, basis, &flow_params, &solver_params);
+    solver.solve();
 }
