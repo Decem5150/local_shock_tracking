@@ -1,6 +1,5 @@
 use crate::disc::gauss_points::{
-    lobatto_points::get_lobatto_points_interval,
-    legendre_points::get_legendre_points_interval,
+    legendre_points::get_legendre_points_interval, lobatto_points::get_lobatto_points_interval,
 };
 use ndarray::{Array, Ix1, Ix2};
 
@@ -16,7 +15,7 @@ pub struct LagrangeBasis1D {
 pub struct LagrangeBasis1DLobatto {
     pub cell_gauss_points: Array<f64, Ix1>,
     pub cell_gauss_weights: Array<f64, Ix1>,
-    pub phis_cell_gps: Array<f64, Ix2>, // (ngp, nbasis)
+    pub phis_cell_gps: Array<f64, Ix2>,  // (ngp, nbasis)
     pub dphis_cell_gps: Array<f64, Ix2>, // (ngp, nbasis)
 }
 

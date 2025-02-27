@@ -76,12 +76,18 @@ impl Mesh1d {
         let internal_nodes = Array::from_iter(1..node_num - 1);
         let internal_elements = Array::from_iter(0..elem_num - 1);
         let boundary_elements = Array::from_vec(vec![0, elem_num - 1]);
-        let mut boundary_patches = Vec::new();
-        boundary_patches.push(BoundaryPatch1d {
-            inode: 0,
-            boundary_type: BoundaryType::Dirichlet,
-            boundary_quantity: None,
-        });
+        let mut boundary_patches = vec![
+            BoundaryPatch1d {
+                inode: 0,
+                boundary_type: BoundaryType::Dirichlet,
+                boundary_quantity: Some(BoundaryQuantity1d { u: 0.0 }),
+            },
+            BoundaryPatch1d {
+                inode: elem_num,
+                boundary_type: BoundaryType::Dirichlet,
+                boundary_quantity: Some(BoundaryQuantity1d { u: 1.0 }),
+            },
+        ];
         boundary_patches.push(BoundaryPatch1d {
             inode: elem_num,
             boundary_type: BoundaryType::Dirichlet,
@@ -102,11 +108,11 @@ impl Mesh1d {
         mesh1d
     }
     pub fn compute_jacob_det(&mut self) {
-        for &ielem in self.internal_elements.iter() {
-            let inodes: ArrayView1<usize> = self.elements[ielem].inodes.view();
+        for elem in self.elements.iter_mut() {
+            let inodes: ArrayView1<usize> = elem.inodes.view();
             let x0 = self.nodes[inodes[0]].x;
             let x1 = self.nodes[inodes[1]].x;
-            self.elements[ielem].jacob_det = 0.5 * (x1 - x0);
+            elem.jacob_det = 0.5 * (x1 - x0);
         }
     }
     /*

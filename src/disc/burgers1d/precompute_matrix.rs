@@ -1,6 +1,6 @@
+use super::Disc1dBurgers;
 use ndarray::Array2;
 use ndarray_linalg::Inverse;
-use super::Disc1dBurgers;
 
 impl<'a> Disc1dBurgers<'a> {
     pub fn compute_m_mat(&mut self) {
@@ -23,11 +23,11 @@ impl<'a> Disc1dBurgers<'a> {
                 let it = i / cell_ngp; // temporal index
                 let jx = j % cell_ngp; // spatial index
                 let jt = j / cell_ngp; // temporal index
-                
+
                 // Only compute when indices match (otherwise result is 0)
                 if ix == jx && it == jt {
-                    self.stst_m_mat[[i, j]] = self.basis.cell_gauss_weights[ix] 
-                                      * self.basis.cell_gauss_weights[it];
+                    self.stst_m_mat[[i, j]] =
+                        self.basis.cell_gauss_weights[ix] * self.basis.cell_gauss_weights[it];
                 } else {
                     self.stst_m_mat[[i, j]] = 0.0;
                 }
@@ -42,9 +42,9 @@ impl<'a> Disc1dBurgers<'a> {
             for j in 0..cell_ngp * cell_ngp {
                 let jx = j % cell_ngp;
                 let jt = j / cell_ngp;
-                
+
                 // Due to Lagrange polynomial properties, only compute at matching indices
-                self.sst_kxi_mat[[i, j]] = self.basis.cell_gauss_weights[jx] 
+                self.sst_kxi_mat[[i, j]] = self.basis.cell_gauss_weights[jx]
                     * self.basis.cell_gauss_weights[jt]
                     * self.basis.dphis_cell_gps[(jx, i)];
             }
@@ -53,28 +53,25 @@ impl<'a> Disc1dBurgers<'a> {
         // compute spatial stiffness matrix of the two space-time polynomials
         for i in 0..cell_ngp * cell_ngp {
             // ith space-time DOF
+            let ix = i % cell_ngp; // spatial index
+            let it = i / cell_ngp; // temporal index
             for j in 0..cell_ngp * cell_ngp {
                 // jth space-time DOF
-                let mut sum = 0.0;
-                let ix = i % cell_ngp; // spatial index
-                let it = i / cell_ngp; // temporal index
                 let jx = j % cell_ngp; // spatial index
                 let jt = j / cell_ngp; // temporal index
+                // Spatial integral
+                let mut spatial = 0.0;
                 for k_x in 0..cell_ngp {
-                    // spatial quadrature point
-                    for k_t in 0..cell_ngp {
-                        // temporal quadrature point
-                        if ix == k_x && it == k_t && jt == k_t {
-                            sum += self.basis.cell_gauss_weights[k_x]
-                                * self.basis.cell_gauss_weights[k_t]
-                                * self.basis.dphis_cell_gps[(k_x, jx)];
-                        }
-                        else {
-                            sum += 0.0;
-                        }   
-                    }
+                    spatial += self.basis.cell_gauss_weights[k_x]
+                        * self.basis.dphis_cell_gps[(k_x, jx)]
+                        * self.basis.phis_cell_gps[(k_x, ix)];
                 }
-                self.stst_kxi_mat[[i, j]] = sum;
+
+                // Temporal integral
+                let temporal =
+                    self.basis.cell_gauss_weights[it] * self.basis.phis_cell_gps[(it, jt)];
+
+                self.stst_kxi_mat[[i, j]] = spatial * temporal;
             }
         }
     }
@@ -82,20 +79,19 @@ impl<'a> Disc1dBurgers<'a> {
         let cell_ngp = self.solver_param.cell_gp_num;
         let mut f1_mat = Array2::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp));
         for i in 0..cell_ngp * cell_ngp {
+            let ix = i % cell_ngp; // Spatial component
+            let it = i / cell_ngp; // Temporal component
             for j in 0..cell_ngp * cell_ngp {
+                let jx = j % cell_ngp;
+                let jt = j / cell_ngp;
+
                 let mut sum = 0.0;
                 for k_x in 0..cell_ngp {
-                    // spatial quadrature
-                    let ix = i % cell_ngp; // spatial index
-                    let it = i / cell_ngp; // temporal index
-                    let jx = j % cell_ngp;
-                    let jt = j / cell_ngp;
-
                     sum += self.basis.cell_gauss_weights[k_x]
-                        * self.basis.phis_cell_gps[(k_x, ix)]
-                        * self.basis.phis_cell_gps[(1, it)]
-                        * self.basis.phis_cell_gps[(k_x, jx)]
-                        * self.basis.phis_cell_gps[(1, jt)];
+                        * self.basis.phis_cell_gps[(k_x, ix)]  // φ_i^x(x_k)
+                        * self.basis.phis_cell_gps[(k_x, jx)]  // φ_j^x(x_k)
+                        * self.basis.phis_cell_gps[(cell_ngp - 1, it)] // φ_i^t(x_{cell_ngp-1})
+                        * self.basis.phis_cell_gps[(cell_ngp - 1, jt)]; // φ_j^t(x_{cell_ngp-1})
                 }
                 f1_mat[[i, j]] = sum;
             }
@@ -103,26 +99,24 @@ impl<'a> Disc1dBurgers<'a> {
         // Compute temporal stiffness matrix for space-time basis
         let mut t_mat = Array2::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp));
         for i in 0..cell_ngp * cell_ngp {
+            // ith space-time DOF
+            let ix = i % cell_ngp; // spatial index
+            let it = i / cell_ngp; // temporal index
             for j in 0..cell_ngp * cell_ngp {
-                let mut sum = 0.0;
-                for k_x in 0..cell_ngp {
-                    // spatial quadrature
-                    for k_t in 0..cell_ngp {
-                        // temporal quadrature
-                        let ix = i % cell_ngp; // spatial index
-                        let it = i / cell_ngp; // temporal index
-                        let jx = j % cell_ngp;
-                        let jt = j / cell_ngp;
-
-                        sum += self.basis.cell_gauss_weights[k_x]
-                            * self.basis.cell_gauss_weights[k_t]
-                            * self.basis.phis_cell_gps[(k_x, ix)]
-                            * self.basis.dphis_cell_gps[(k_t, it)]
-                            * self.basis.phis_cell_gps[(k_x, jx)]
-                            * self.basis.phis_cell_gps[(k_t, jt)];
-                    }
+                // jth space-time DOF
+                let jx = j % cell_ngp; // spatial index
+                let jt = j / cell_ngp; // temporal index
+                // Spatial integral
+                let spatial =
+                    self.basis.cell_gauss_weights[ix] * self.basis.phis_cell_gps[(ix, jx)];
+                // Temporal integral
+                let mut temporal = 0.0;
+                for k_t in 0..cell_ngp {
+                    temporal += self.basis.cell_gauss_weights[k_t]
+                        * self.basis.dphis_cell_gps[(k_t, it)]
+                        * self.basis.phis_cell_gps[(k_t, jt)];
                 }
-                t_mat[[i, j]] = sum;
+                t_mat[[i, j]] = spatial * temporal;
             }
         }
         let mut k1_mat = Array2::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp));
@@ -137,22 +131,17 @@ impl<'a> Disc1dBurgers<'a> {
     pub fn compute_f0_mat(&mut self) {
         let cell_ngp = self.solver_param.cell_gp_num;
         for i in 0..cell_ngp * cell_ngp {
-            for j in 0..cell_ngp * cell_ngp {
+            let ix = i % cell_ngp; // spatial index
+            let it = i / cell_ngp; // temporal index
+            for j in 0..cell_ngp {
                 let mut sum = 0.0;
                 for k_x in 0..cell_ngp {
-                    // spatial quadrature
-                    let ix = i % cell_ngp; // spatial index
-                    let it = i / cell_ngp; // temporal index
-                    let jx = j % cell_ngp;
-                    let jt = j / cell_ngp;
-
-                    sum += self.basis.cell_gauss_weights[k_x] * 
-                           self.basis.phis_cell_gps[(k_x, ix)] * 
-                           self.basis.phis_cell_gps[(0, it)] *  // Evaluate temporal basis at t=0
-                           self.basis.phis_cell_gps[(k_x, jx)] * 
-                           self.basis.phis_cell_gps[(0, jt)]; // Evaluate temporal basis at t=0
+                    sum += self.basis.cell_gauss_weights[k_x]
+                        * self.basis.phis_cell_gps[(k_x, ix)]  // φ_i^x(x_k)
+                        * self.basis.phis_cell_gps[(0, it)] // φ_i^t(x_{0})
+                        * self.basis.phis_cell_gps[(k_x, j)]; // ψ_j(x_k)
                 }
-                self.stst_f0_mat[[i, j]] = sum;
+                self.sts_f0_mat[[i, j]] = sum;
             }
         }
     }

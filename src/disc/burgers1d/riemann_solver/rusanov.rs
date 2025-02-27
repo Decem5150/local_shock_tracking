@@ -15,4 +15,3 @@ pub fn rusanov(ul: ArrayView1<f64>, ur: ArrayView1<f64>) -> Array1<f64> {
     flux[0] = 0.5 * (fl + fr - wave_speed * (ur[0] - ul[0]));
     flux
 }
-

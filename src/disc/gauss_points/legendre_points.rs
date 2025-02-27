@@ -1,4 +1,4 @@
-use ndarray::{array, Array, Ix1};
+use ndarray::{Array, Ix1, array};
 
 pub fn get_legendre_points_interval(points_num: usize) -> (Array<f64, Ix1>, Array<f64, Ix1>) {
     let (gauss_points, gauss_weights) = match points_num {

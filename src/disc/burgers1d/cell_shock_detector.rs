@@ -7,7 +7,11 @@ impl<'a> Disc1dBurgers<'a> {
         let detected_shock = !self.numerical_admissibility_detection(old_sol, candidate_sol);
         detected_shock
     }
-    fn numerical_admissibility_detection(&self, old_sol: ArrayView3<f64>, candidate_sol: ArrayView2<f64>) -> bool {
+    fn numerical_admissibility_detection(
+        &self,
+        old_sol: ArrayView3<f64>,
+        candidate_sol: ArrayView2<f64>,
+    ) -> bool {
         let ndof = self.solver_param.cell_gp_num;
         let delta0: f64 = 1e-4;
         let epsilon: f64 = 1e-3;
@@ -23,7 +27,9 @@ impl<'a> Disc1dBurgers<'a> {
         let delta = delta0.max(epsilon * (max_sol - min_sol));
         let mut is_admissible = true;
         for idof in 0..ndof {
-            if (candidate_sol[[idof, 0]] + delta < min_sol) || (candidate_sol[[idof, 0]] - delta > max_sol) {
+            if (candidate_sol[[idof, 0]] + delta < min_sol)
+                || (candidate_sol[[idof, 0]] - delta > max_sol)
+            {
                 is_admissible = false;
                 break;
             }

@@ -4,13 +4,19 @@ mod flux;
 mod precompute_matrix;
 mod riemann_solver;
 // mod shock_tracking;
-use super::{basis::lagrange1d::LagrangeBasis1DLobatto, mesh::mesh1d::Mesh1d};
-use crate::solver::{FlowParameters, SolverParameters};
+use super::{
+    basis::lagrange1d::LagrangeBasis1DLobatto,
+    mesh::mesh1d::{Element1d, Mesh1d},
+};
+use crate::{
+    io::write_to_csv::write_to_csv,
+    solver::{FlowParameters, SolverParameters},
+};
 use boundary_condition::{BoundaryQuantity1d, BoundaryType};
 use flux::flux1d;
 use ndarray::{
-    s, Array1, Array2, Array3, Array4, ArrayView1, ArrayView2, ArrayView3, ArrayView4,
-    ArrayViewMut2, ArrayViewMut3, ArrayViewMut4,
+    Array1, Array2, Array3, Array4, ArrayView1, ArrayView2, ArrayView3, ArrayView4, ArrayViewMut2,
+    ArrayViewMut3, ArrayViewMut4, s,
 };
 use riemann_solver::rusanov::rusanov;
 
@@ -28,7 +34,7 @@ pub struct Disc1dBurgers<'a> {
     stst_im_mat: Array2<f64>, // inverse mass matrix of two space-time polynomials
     stst_kxi_mat: Array2<f64>, // spatial stiffness matrix of two space-time polynomials
     stst_ik1_mat: Array2<f64>, // inverse temporal stiffness matrix of two space-time polynomials
-    stst_f0_mat: Array2<f64>, // mass matrix at relative time 0 for two space-time polynomials
+    sts_f0_mat: Array2<f64>,  // mass matrix at relative time 0 for two space-time polynomials
 }
 impl<'a> Disc1dBurgers<'a> {
     pub fn new(
@@ -45,7 +51,7 @@ impl<'a> Disc1dBurgers<'a> {
         let stst_im_mat: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp));
         let stst_kxi_mat: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp));
         let stst_ik1_mat: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp));
-        let stst_f0_mat: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp));
+        let sts_f0_mat: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, cell_ngp));
         let mut disc = Disc1dBurgers {
             current_time: 0.0,
             current_step: 0,
@@ -60,13 +66,20 @@ impl<'a> Disc1dBurgers<'a> {
             stst_im_mat,
             stst_kxi_mat,
             stst_ik1_mat,
-            stst_f0_mat,
+            sts_f0_mat,
         };
         disc.compute_m_mat();
         disc.compute_kxi_mat();
         disc.compute_ik1_mat();
         disc.compute_f0_mat();
-
+        dbg!(&disc.ss_m_mat);
+        dbg!(&disc.ss_im_mat);
+        dbg!(&disc.sst_kxi_mat);
+        dbg!(&disc.stst_m_mat);
+        dbg!(&disc.stst_im_mat);
+        dbg!(&disc.stst_kxi_mat);
+        dbg!(&disc.stst_ik1_mat);
+        dbg!(&disc.sts_f0_mat);
         disc
     }
     pub fn solve(&mut self, mut solutions: ArrayViewMut3<f64>) {
@@ -77,47 +90,90 @@ impl<'a> Disc1dBurgers<'a> {
         let mut old_solutions: Array3<f64> = solutions.to_owned();
         // let bnd_lqh: Array4<f64> = Array4::zeros((nelem, 2, cell_ngp, 1));
         let mut lqh: Array4<f64> = Array4::zeros((nelem, cell_ngp, cell_ngp, 1));
+        write_to_csv(
+            solutions.view(),
+            self.mesh,
+            &self.basis,
+            &format!("outputs/solutions_{}.csv", self.current_step),
+        )
+        .unwrap();
         while self.current_step < self.solver_param.final_step
             && self.current_time < self.solver_param.final_time
         {
+            residuals.fill(0.0);
             old_solutions.assign(&solutions);
             let mut dt = self.compute_time_step(solutions.view());
             if self.current_time + dt > self.solver_param.final_time {
                 dt = self.solver_param.final_time - self.current_time;
             }
             for ielem in 0..nelem {
+                let elem = &self.mesh.elements[ielem];
                 let solutions_slice: ArrayView2<f64> = solutions.slice(s![ielem, .., ..]);
                 // let bnd_lqh_slice: ArrayViewMut3<f64> = bnd_lqh.slice_mut(s![ielem, .., .., ..]);
                 self.local_space_time_predictor(
                     lqh.slice_mut(s![ielem, .., .., ..]),
                     solutions_slice,
+                    elem,
                     dt,
                 );
-                let residuals_slice: ArrayViewMut2<f64> = residuals.slice_mut(s![ielem, .., ..]);
-                self.volume_integral(lqh.slice(s![ielem, .., .., ..]), residuals_slice);
+                // let residuals_slice: ArrayViewMut2<f64> = residuals.slice_mut(s![ielem, .., ..]);
+                // self.volume_integral(lqh.slice(s![ielem, .., .., ..]), residuals_slice, elem);
             }
-            for inode in 0..nnode {
+            /*
+            write_to_csv(
+                lqh.view().slice(s![.., cell_ngp - 1, .., ..]),
+                self.mesh,
+                &self.basis,
+                &format!("outputs/lqh_{}.csv", self.current_step),
+            )
+            .unwrap();
+            */
+            for ielem in 0..nelem {
+                let elem = &self.mesh.elements[ielem];
+                let residuals_slice: ArrayViewMut2<f64> = residuals.slice_mut(s![ielem, .., ..]);
+                self.volume_integral(lqh.slice(s![ielem, .., .., ..]), residuals_slice, elem);
+            }
+            /*
+            write_to_csv(
+                residuals.view(),
+                self.mesh,
+                &self.basis,
+                &format!("outputs/residuals_{}.csv", self.current_step),
+            )
+            .unwrap();
+            */
+            for &inode in self.mesh.internal_nodes.iter() {
                 let node = &self.mesh.nodes[inode];
                 let ilelem = node.parent_elements[0];
                 let irelem = node.parent_elements[1];
-                let left_bnd_lqh: ArrayView2<f64> = lqh.slice(s![ilelem, cell_ngp - 1, .., ..]);
-                let right_bnd_lqh: ArrayView2<f64> = lqh.slice(s![irelem, 0, .., ..]);
+                let left_elem = &self.mesh.elements[ilelem as usize];
+                let right_elem = &self.mesh.elements[irelem as usize];
+                let left_bnd_lqh: ArrayView2<f64> = lqh.slice(s![ilelem, .., cell_ngp - 1, ..]);
+                let right_bnd_lqh: ArrayView2<f64> = lqh.slice(s![irelem, .., 0, ..]);
                 let (left_res, right_res) =
                     residuals.multi_slice_mut((s![ilelem, .., ..], s![irelem, .., ..]));
-                self.edge_integral(left_bnd_lqh, right_bnd_lqh, left_res, right_res);
+                self.edge_integral(
+                    left_bnd_lqh,
+                    right_bnd_lqh,
+                    left_res,
+                    right_res,
+                    left_elem,
+                    right_elem,
+                );
             }
             // apply bc
-            self.apply_bc(lqh.view(), residuals.view_mut());
+            // self.apply_bc(lqh.view(), residuals.view_mut());
             // multiply inverse mass matrix, accounting for physical domain scaling
             for ielem in 0..nelem {
                 let jacob_det = self.mesh.elements[ielem].jacob_det;
-                let res_slice = residuals.slice(s![ielem, .., ..]);
-                let computed = (1.0 / jacob_det) * self.ss_im_mat.dot(&res_slice);
+                let computed =
+                    (1.0 / jacob_det) * self.ss_im_mat.dot(&residuals.slice(s![ielem, .., ..]));
                 residuals.slice_mut(s![ielem, .., ..]).assign(&computed);
             }
             // update solution
             solutions.scaled_add(dt, &residuals.view());
             // detect shock
+            /*
             for ielem in 0..nelem {
                 let old_sol: Array3<f64> = {
                     let neighbor_num = self.mesh.elements[ielem].ineighbors.len();
@@ -133,13 +189,52 @@ impl<'a> Disc1dBurgers<'a> {
                     }
                     old_sol
                 };
+                /*
+                write_to_csv(
+                    solutions.view(),
+                    self.mesh,
+                    &self.basis,
+                    &format!("outputs/solutions_{}.csv", self.current_step + 1),
+                )
+                .unwrap();
+                */
                 let candidate_sol: ArrayView2<f64> = solutions.slice(s![ielem, .., ..]);
                 if self.detect_shock(old_sol.view(), candidate_sol) {
+                    panic!("Shock detected!");
                     // left for shock tracking
                 }
             }
+            */
             self.current_time += dt;
             self.current_step += 1;
+            println!("current_step: {}", self.current_step);
+            if self.current_step % 20 == 0 {
+                write_to_csv(
+                    solutions.view(),
+                    self.mesh,
+                    &self.basis,
+                    &format!("outputs/solutions_{}.csv", self.current_step),
+                )
+                .unwrap();
+            }
+        }
+    }
+    pub fn initialize_solution(
+        &mut self,
+        mut solutions: ArrayViewMut3<f64>,
+        init_func: &dyn Fn(f64) -> f64,
+    ) {
+        let nelem = self.mesh.elem_num;
+        let cell_ngp = self.solver_param.cell_gp_num;
+        for ielem in 0..nelem {
+            let elem = &self.mesh.elements[ielem];
+            let x_left = self.mesh.nodes[elem.inodes[0]].x;
+            let jacob_det = elem.jacob_det;
+            for igp in 0..cell_ngp {
+                let xi = self.basis.cell_gauss_points[igp];
+                let x = x_left + xi * jacob_det;
+                solutions[[ielem, igp, 0]] = init_func(x);
+            }
         }
     }
     fn compute_time_step(&self, solutions: ArrayView3<f64>) -> f64 {
@@ -168,51 +263,48 @@ impl<'a> Disc1dBurgers<'a> {
         &mut self,
         mut lqh: ArrayViewMut3<f64>, // (cell_ngp, cell_ngp, neq)
         sol: ArrayView2<f64>,        // (ndof, neq)
+        elem: &Element1d,
         dt: f64,
     ) {
         let cell_ngp = self.solver_param.cell_gp_num;
-        let neq = self.solver_param.equation_num;
+        let jacob_det = elem.jacob_det;
         // Dimensions: (time, x, var) for better memory access in Rust
-        let mut lqhold: Array3<f64> = Array3::zeros((cell_ngp, cell_ngp, neq)); // old DOF
-        let mut lfh: Array3<f64> = Array3::zeros((cell_ngp, cell_ngp, neq)); // flux tensor
+        let mut lfh: Array3<f64> = Array3::zeros((cell_ngp, cell_ngp, 1)); // flux tensor
 
         // Initial guess for current element
         for kgp in 0..cell_ngp {
             // time
             for igp in 0..cell_ngp {
                 // x
-                for ivar in 0..neq {
-                    lqh[[kgp, igp, ivar]] = sol[[ivar, igp]];
+                for ivar in 0..1 {
+                    lqh[[kgp, igp, ivar]] = sol[[igp, ivar]];
                 }
             }
         }
 
         // Picard iterations for current element
         for _iter in 0..self.solver_param.polynomial_order + 1 {
-            lqhold.assign(&lqh);
             // Compute fluxes
             for kgp in 0..cell_ngp {
                 // time
                 for igp in 0..cell_ngp {
                     // x
                     let f: Array1<f64> = flux1d(lqh.slice(s![kgp, igp, ..]));
-                    lfh.slice_mut(s![kgp, igp, ..]).assign(&f);
+                    lfh.slice_mut(s![kgp, igp, ..])
+                        .assign(&(dt * &f / jacob_det));
                 }
             }
             // update lqh
-            for ivar in 0..neq {
+            for ivar in 0..1 {
                 // Convert 2D views to 1D vectors for matrix multiplication
-                let lqhold_slice: ArrayView1<f64> = lqhold
-                    .slice(s![.., .., ivar])
-                    .into_shape(cell_ngp * cell_ngp)
-                    .unwrap();
                 let lfh_slice: ArrayView1<f64> = lfh
                     .slice(s![.., .., ivar])
                     .into_shape(cell_ngp * cell_ngp)
                     .unwrap();
                 // Perform matrix multiplication and store result back in lqh
                 let result: Array1<f64> = self.stst_ik1_mat.dot(
-                    &(self.stst_f0_mat.dot(&lqhold_slice) + dt * self.stst_kxi_mat.dot(&lfh_slice)),
+                    &(self.sts_f0_mat.dot(&sol.slice(s![.., ivar]))
+                        - self.stst_kxi_mat.dot(&lfh_slice)),
                 );
                 lqh.slice_mut(s![.., .., ivar])
                     .assign(&result.into_shape((cell_ngp, cell_ngp)).unwrap());
@@ -223,6 +315,7 @@ impl<'a> Disc1dBurgers<'a> {
         &mut self,
         lqh: ArrayView3<f64>,        // (ntdof, nxdof, neq)
         mut res: ArrayViewMut2<f64>, // (nxdof, neq)
+        elem: &Element1d,
     ) {
         let cell_ngp = self.solver_param.cell_gp_num;
         let mut lfh: Array3<f64> = Array3::zeros((cell_ngp, cell_ngp, 1));
@@ -232,14 +325,13 @@ impl<'a> Disc1dBurgers<'a> {
                 lfh.slice_mut(s![kgp, igp, ..]).assign(&f);
             }
         }
-        for idof in 0..cell_ngp {
-            for ivar in 0..1 {
-                let lfh_slice: ArrayView1<f64> = lfh
-                    .slice(s![.., .., ivar])
-                    .into_shape(cell_ngp * cell_ngp)
-                    .unwrap();
-                res[[idof, ivar]] += self.sst_kxi_mat.dot(&lfh_slice.view()).sum();
-            }
+        for ivar in 0..1 {
+            let lfh_slice: ArrayView1<f64> = lfh
+                .slice(s![.., .., ivar])
+                .into_shape(cell_ngp * cell_ngp)
+                .unwrap();
+            res.slice_mut(s![.., ivar])
+                .scaled_add(1.0, &self.sst_kxi_mat.dot(&lfh_slice));
         }
     }
     fn edge_integral(
@@ -248,12 +340,15 @@ impl<'a> Disc1dBurgers<'a> {
         right_bnd_lqh: ArrayView2<f64>,    // (ntgp, neq)
         mut left_res: ArrayViewMut2<f64>,  // (nxdof, neq)
         mut right_res: ArrayViewMut2<f64>, // (nxdof, neq)
+        left_elem: &Element1d,
+        right_elem: &Element1d,
     ) {
         let cell_ngp = self.solver_param.cell_gp_num;
         let nbasis = cell_ngp;
         let weights = &self.basis.cell_gauss_weights;
         for ibasis in 0..nbasis {
             for kgp in 0..cell_ngp {
+                // time
                 let left_value: ArrayView1<f64> = left_bnd_lqh.slice(s![kgp, ..]);
                 let right_value: ArrayView1<f64> = right_bnd_lqh.slice(s![kgp, ..]);
                 let num_flux: Array1<f64> = rusanov(left_value, right_value);

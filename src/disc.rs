@@ -7,7 +7,6 @@ pub mod mesh;
 pub mod burgers1d;
 // pub mod euler1d;
 
-
 /*
 pub struct Disc1dEuler<'a> {
     pub current_time: f64,
@@ -213,10 +212,10 @@ impl<'a> Disc1dEuler<'a> {
                     let jx = j % cell_ngp;
                     let jt = j / cell_ngp;
 
-                    sum += self.basis.cell_gauss_weights[k_x] * 
-                           self.basis.phis_cell_gps[(k_x, ix)] * 
+                    sum += self.basis.cell_gauss_weights[k_x] *
+                           self.basis.phis_cell_gps[(k_x, ix)] *
                            self.basis.phis_cell_gps[(0, it)] *  // Evaluate temporal basis at t=0
-                           self.basis.phis_cell_gps[(k_x, jx)] * 
+                           self.basis.phis_cell_gps[(k_x, jx)] *
                            self.basis.phis_cell_gps[(0, jt)]; // Evaluate temporal basis at t=0
                 }
                 self.f0_mat[[i, j]] = sum;
