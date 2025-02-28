@@ -72,6 +72,7 @@ impl<'a> Disc1dBurgers<'a> {
         disc.compute_kxi_mat();
         disc.compute_ik1_mat();
         disc.compute_f0_mat();
+        /*
         dbg!(&disc.ss_m_mat);
         dbg!(&disc.ss_im_mat);
         dbg!(&disc.sst_kxi_mat);
@@ -80,6 +81,7 @@ impl<'a> Disc1dBurgers<'a> {
         dbg!(&disc.stst_kxi_mat);
         dbg!(&disc.stst_ik1_mat);
         dbg!(&disc.sts_f0_mat);
+        */
         disc
     }
     pub fn solve(&mut self, mut solutions: ArrayViewMut3<f64>) {
@@ -94,6 +96,7 @@ impl<'a> Disc1dBurgers<'a> {
             solutions.view(),
             self.mesh,
             &self.basis,
+            self.current_time,
             &format!("outputs/solutions_{}.csv", self.current_step),
         )
         .unwrap();
@@ -103,6 +106,7 @@ impl<'a> Disc1dBurgers<'a> {
             residuals.fill(0.0);
             old_solutions.assign(&solutions);
             let mut dt = self.compute_time_step(solutions.view());
+            // let mut dt = 0.002;
             if self.current_time + dt > self.solver_param.final_time {
                 dt = self.solver_param.final_time - self.current_time;
             }
@@ -173,8 +177,8 @@ impl<'a> Disc1dBurgers<'a> {
             // update solution
             solutions.scaled_add(dt, &residuals.view());
             // detect shock
-            /*
-            for ielem in 0..nelem {
+
+            for &ielem in self.mesh.internal_nodes.iter() {
                 let old_sol: Array3<f64> = {
                     let neighbor_num = self.mesh.elements[ielem].ineighbors.len();
                     let mut old_sol: Array3<f64> = Array3::zeros((neighbor_num + 1, cell_ngp, 1));
@@ -200,24 +204,61 @@ impl<'a> Disc1dBurgers<'a> {
                 */
                 let candidate_sol: ArrayView2<f64> = solutions.slice(s![ielem, .., ..]);
                 if self.detect_shock(old_sol.view(), candidate_sol) {
+                    println!("Index of shock: {}", ielem);
+                    let _old_error = write_to_csv(
+                        old_solutions.view(),
+                        self.mesh,
+                        &self.basis,
+                        self.current_time,
+                        &format!("outputs/solutions_old.csv"),
+                    )
+                    .unwrap();
+                    let final_error = write_to_csv(
+                        solutions.view(),
+                        self.mesh,
+                        &self.basis,
+                        self.current_time,
+                        &format!("outputs/solutions_final.csv"),
+                    )
+                    .unwrap();
+                    println!("Final L² error: {:.4e}", final_error);
+                    println!("Final step: {}", self.current_step);
+                    println!("Final time: {}", self.current_time);
                     panic!("Shock detected!");
                     // left for shock tracking
                 }
             }
-            */
+
             self.current_time += dt;
             self.current_step += 1;
-            println!("current_step: {}", self.current_step);
-            if self.current_step % 20 == 0 {
-                write_to_csv(
+            println!("step: {}, time: {}", self.current_step, self.current_time);
+            /*
+            if self.current_step % 2 == 0 {
+                let error = write_to_csv(
                     solutions.view(),
                     self.mesh,
                     &self.basis,
+                    self.current_time,
                     &format!("outputs/solutions_{}.csv", self.current_step),
                 )
                 .unwrap();
+                println!("Step {} L² error: {:.4e}", self.current_step, error);
             }
+            */
         }
+
+        // Final error calculation
+        let final_error = write_to_csv(
+            solutions.view(),
+            self.mesh,
+            &self.basis,
+            self.current_time,
+            &format!("outputs/solutions_final.csv"),
+        )
+        .unwrap();
+        println!("Final L² error: {:.4e}", final_error);
+        println!("Final step: {}", self.current_step);
+        println!("Final time: {}", self.current_time);
     }
     pub fn initialize_solution(
         &mut self,
@@ -252,7 +293,8 @@ impl<'a> Disc1dBurgers<'a> {
             // Wave speed for Burgers equation is |u|
             let speed = u.abs();
             let dx = self.mesh.elements[ielem].jacob_det;
-            let dt = self.solver_param.cfl * dx / speed;
+            let dt = self.solver_param.cfl * dx
+                / ((self.solver_param.polynomial_order as f64 * 2.0 + 1.0) * speed);
 
             time_step = time_step.min(dt);
         }

@@ -112,7 +112,7 @@ impl Mesh1d {
             let inodes: ArrayView1<usize> = elem.inodes.view();
             let x0 = self.nodes[inodes[0]].x;
             let x1 = self.nodes[inodes[1]].x;
-            elem.jacob_det = 0.5 * (x1 - x0);
+            elem.jacob_det = x1 - x0;
         }
     }
     /*

@@ -1,6 +1,6 @@
 {
-    "polynomial_order": 3,
-    "cfl": 0.2,
-    "final_time": 1.0,
-    "final_step": 200
+    "polynomial_order": 4,
+    "cfl": 0.8,
+    "final_time": 0.4,
+    "final_step": 500
 }

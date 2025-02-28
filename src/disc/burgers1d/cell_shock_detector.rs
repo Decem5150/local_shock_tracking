@@ -2,10 +2,9 @@ use ndarray::{ArrayView2, ArrayView3};
 
 use super::Disc1dBurgers;
 
-impl<'a> Disc1dBurgers<'a> {
+impl Disc1dBurgers<'_> {
     pub fn detect_shock(&self, old_sol: ArrayView3<f64>, candidate_sol: ArrayView2<f64>) -> bool {
-        let detected_shock = !self.numerical_admissibility_detection(old_sol, candidate_sol);
-        detected_shock
+        !self.numerical_admissibility_detection(old_sol, candidate_sol)
     }
     fn numerical_admissibility_detection(
         &self,
@@ -24,12 +23,20 @@ impl<'a> Disc1dBurgers<'a> {
                 min_sol = min_sol.min(old_sol[[ielem, idof, 0]]);
             }
         }
+        dbg!(&max_sol);
+        dbg!(&min_sol);
         let delta = delta0.max(epsilon * (max_sol - min_sol));
         let mut is_admissible = true;
         for idof in 0..ndof {
+            dbg!(&candidate_sol[[idof, 0]]);
+            dbg!(&delta);
             if (candidate_sol[[idof, 0]] + delta < min_sol)
                 || (candidate_sol[[idof, 0]] - delta > max_sol)
             {
+                dbg!(&candidate_sol);
+                dbg!(&delta);
+                dbg!(&min_sol);
+                dbg!(&max_sol);
                 is_admissible = false;
                 break;
             }
