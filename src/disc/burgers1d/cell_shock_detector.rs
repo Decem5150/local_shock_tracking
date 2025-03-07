@@ -13,7 +13,7 @@ impl Disc1dBurgers<'_> {
     ) -> bool {
         let ndof = self.solver_param.cell_gp_num;
         let delta0: f64 = 1e-4;
-        let epsilon: f64 = 1e-3;
+        let epsilon: f64 = 1e-4;
 
         let mut max_sol = old_sol[[0, 0, 0]];
         let mut min_sol = old_sol[[0, 0, 0]];
@@ -23,17 +23,19 @@ impl Disc1dBurgers<'_> {
                 min_sol = min_sol.min(old_sol[[ielem, idof, 0]]);
             }
         }
-        dbg!(&max_sol);
-        dbg!(&min_sol);
+        //dbg!(&max_sol);
+        //dbg!(&min_sol);
         let delta = delta0.max(epsilon * (max_sol - min_sol));
         let mut is_admissible = true;
         for idof in 0..ndof {
-            dbg!(&candidate_sol[[idof, 0]]);
-            dbg!(&delta);
+            //dbg!(&candidate_sol[[idof, 0]]);
+            //dbg!(&delta);
             if (candidate_sol[[idof, 0]] + delta < min_sol)
                 || (candidate_sol[[idof, 0]] - delta > max_sol)
             {
+                let tmp = epsilon * (max_sol - min_sol);
                 dbg!(&candidate_sol);
+                dbg!(&tmp);
                 dbg!(&delta);
                 dbg!(&min_sol);
                 dbg!(&max_sol);

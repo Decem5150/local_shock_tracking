@@ -205,14 +205,6 @@ impl<'a> Disc1dBurgers<'a> {
                 let candidate_sol: ArrayView2<f64> = solutions.slice(s![ielem, .., ..]);
                 if self.detect_shock(old_sol.view(), candidate_sol) {
                     println!("Index of shock: {}", ielem);
-                    let _old_error = write_to_csv(
-                        old_solutions.view(),
-                        self.mesh,
-                        &self.basis,
-                        self.current_time,
-                        &format!("outputs/solutions_old.csv"),
-                    )
-                    .unwrap();
                     let final_error = write_to_csv(
                         solutions.view(),
                         self.mesh,
@@ -232,8 +224,8 @@ impl<'a> Disc1dBurgers<'a> {
             self.current_time += dt;
             self.current_step += 1;
             println!("step: {}, time: {}", self.current_step, self.current_time);
-            /*
-            if self.current_step % 2 == 0 {
+
+            if self.current_step % 10 == 0 {
                 let error = write_to_csv(
                     solutions.view(),
                     self.mesh,
@@ -244,7 +236,6 @@ impl<'a> Disc1dBurgers<'a> {
                 .unwrap();
                 println!("Step {} L² error: {:.4e}", self.current_step, error);
             }
-            */
         }
 
         // Final error calculation

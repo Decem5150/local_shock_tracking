@@ -1,2 +1,2 @@
 pub mod mesh1d;
-// pub mod mesh2d;
+pub mod mesh2d;
