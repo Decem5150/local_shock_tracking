@@ -154,4 +154,79 @@ impl LagrangeBasis1DLobatto {
             dphis_cell_gps,
         }
     }
+
+    /// Evaluates the i-th basis function at point x
+    ///
+    /// # Arguments
+    /// * `i` - Index of the basis function to evaluate
+    /// * `x` - Point at which to evaluate the basis function
+    ///
+    /// # Returns
+    /// Value of the i-th basis function at point x
+    pub fn evaluate_basis_at(&self, i: usize, x: f64) -> f64 {
+        let n = self.cell_gauss_points.len();
+
+        // Check if x is (almost) equal to one of the interpolation points
+        for j in 0..n {
+            if (x - self.cell_gauss_points[j]).abs() < 1e-14 {
+                // Lagrange basis property: L_i(x_j) = δ_ij (Kronecker delta)
+                return if j == i { 1.0 } else { 0.0 };
+            }
+        }
+
+        // Otherwise, compute using the Lagrange formula
+        let mut result = 1.0;
+        let x_i = self.cell_gauss_points[i];
+
+        for j in 0..n {
+            if j != i {
+                let x_j = self.cell_gauss_points[j];
+                result *= (x - x_j) / (x_i - x_j);
+            }
+        }
+
+        result
+    }
+
+    /// Evaluates all basis functions at a given point
+    ///
+    /// # Arguments
+    /// * `x` - Point at which to evaluate the basis functions
+    ///
+    /// # Returns
+    /// Vector containing values of all basis functions at point x
+    pub fn evaluate_all_basis_at(&self, x: f64) -> Vec<f64> {
+        let n = self.cell_gauss_points.len();
+        let mut values = vec![0.0; n];
+
+        for i in 0..n {
+            values[i] = self.evaluate_basis_at(i, x);
+        }
+
+        values
+    }
+
+    /// Evaluates a function at a point using the basis representation
+    ///
+    /// # Arguments
+    /// * `coefficients` - Coefficients of the function in the basis
+    /// * `x` - Point at which to evaluate the function
+    ///
+    /// # Returns
+    /// Value of the function at point x
+    pub fn evaluate_function_at(&self, coefficients: &[f64], x: f64) -> f64 {
+        let n = self.cell_gauss_points.len();
+        assert_eq!(
+            coefficients.len(),
+            n,
+            "Coefficient vector length must match basis size"
+        );
+
+        let mut result = 0.0;
+        for i in 0..n {
+            result += coefficients[i] * self.evaluate_basis_at(i, x);
+        }
+
+        result
+    }
 }

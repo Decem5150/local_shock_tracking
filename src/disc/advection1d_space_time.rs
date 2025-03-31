@@ -4,7 +4,7 @@ mod riemann_solver;
 use flux::space_time_flux1d;
 use ndarray::{
     Array1, Array2, Array3, Array4, ArrayView1, ArrayView2, ArrayView3, ArrayViewMut2,
-    ArrayViewMut3, Axis, s,
+    ArrayViewMut3, s,
 };
 use riemann_solver::smoothed_upwind;
 
@@ -16,7 +16,9 @@ use super::{
 };
 
 pub struct Disc1dAdvectionSpaceTime<'a> {
+    pub current_iter: usize,
     pub basis: LagrangeBasis1DLobatto,
+    pub enriched_basis: LagrangeBasis1DLobatto,
     mesh: &'a Mesh2d,
     solver_param: &'a SolverParameters,
     advection_speed: f64,
@@ -33,7 +35,51 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
     pub fn solve(&mut self, mut solutions: ArrayViewMut3<f64>) {
         let nelem = self.mesh.elem_num;
         let cell_ngp = self.solver_param.cell_gp_num;
-        let mut residuals: Array3<f64> = Array3::zeros((nelem, cell_ngp, 1));
+        let mut residuals: Array3<f64> = Array3::zeros((nelem, cell_ngp * cell_ngp, 1));
+        let mut enriched_residuals: Array3<f64> =
+            Array3::zeros((nelem, (cell_ngp + 1) * (cell_ngp + 1), 1));
+        while self.current_iter < self.solver_param.final_step {
+            self.compute_residuals(solutions.view(), residuals.view_mut());
+            self.compute_enriched_residuals(solutions.view(), enriched_residuals.view_mut());
+            self.current_iter += 1;
+        }
+    }
+    fn interpolate_to_enriched(&self, sol: ArrayView2<f64>) -> Array2<f64> {
+        let cell_ngp = self.solver_param.cell_gp_num;
+        let enriched_ngp = cell_ngp + 1;
+        // Precompute interpolation matrix (standard basis evaluated at enriched points)
+        // This could be stored as a class member for efficiency
+        let mut interp_matrix = Array2::zeros((enriched_ngp * enriched_ngp, cell_ngp * cell_ngp));
+
+        for i_enr in 0..enriched_ngp {
+            let xi_enr = self.enriched_basis.cell_gauss_points[i_enr];
+
+            for j_enr in 0..enriched_ngp {
+                let eta_enr = self.enriched_basis.cell_gauss_points[j_enr];
+                let enr_idx = i_enr * enriched_ngp + j_enr;
+
+                // Evaluate each standard basis at this enriched point
+                for i_std in 0..cell_ngp {
+                    for j_std in 0..cell_ngp {
+                        let std_idx = i_std * cell_ngp + j_std;
+
+                        // Tensor product of 1D basis functions
+                        let phi_xi = self.basis.evaluate_basis_at(i_std, xi_enr);
+                        let phi_eta = self.basis.evaluate_basis_at(j_std, eta_enr);
+                        interp_matrix[[enr_idx, std_idx]] = phi_xi * phi_eta;
+                    }
+                }
+            }
+        }
+
+        // Apply interpolation using ndarray's dot method
+        let enriched_sol = interp_matrix.dot(&sol);
+
+        enriched_sol
+    }
+    fn compute_residuals(&mut self, solutions: ArrayView3<f64>, mut residuals: ArrayViewMut3<f64>) {
+        let nelem = self.mesh.elem_num;
+        let cell_ngp = self.solver_param.cell_gp_num;
         for ielem in 0..nelem {
             let elem = &self.mesh.elements[ielem];
             let solutions_slice: ArrayView2<f64> = solutions.slice(s![ielem, .., ..]);
@@ -78,6 +124,70 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             );
         }
     }
+    fn compute_enriched_residuals(
+        &mut self,
+        solutions: ArrayView3<f64>,
+        mut enriched_residuals: ArrayViewMut3<f64>,
+    ) {
+        let nelem = self.mesh.elem_num;
+        let cell_ngp = self.solver_param.cell_gp_num;
+        let enriched_ngp = cell_ngp + 1;
+        let mut enriched_sol = Array3::zeros((nelem, enriched_ngp * enriched_ngp, 1));
+        for ielem in 0..nelem {
+            let solutions_slice: ArrayView2<f64> = solutions.slice(s![ielem, .., ..]);
+            let mut enriched_sol_slice: ArrayViewMut2<f64> =
+                enriched_sol.slice_mut(s![ielem, .., ..]);
+            enriched_sol_slice.assign(&self.interpolate_to_enriched(solutions_slice));
+        }
+        for ielem in 0..nelem {
+            let elem = &self.mesh.elements[ielem];
+            let enriched_sol_slice: ArrayView2<f64> = enriched_sol.slice(s![ielem, .., ..]);
+            let enriched_residuals_slice: ArrayViewMut2<f64> =
+                enriched_residuals.slice_mut(s![ielem, .., ..]);
+            self.volume_integral(enriched_sol_slice, enriched_residuals_slice, elem);
+        }
+        for &iedge in self.mesh.internal_edges.iter() {
+            let edge = &self.mesh.edges[iedge];
+            let ilelem = edge.parent_elements[0];
+            let irelem = edge.parent_elements[1];
+            let left_elem = &self.mesh.elements[ilelem as usize];
+            let right_elem = &self.mesh.elements[irelem as usize];
+            let left_local_id = edge.local_ids[0] as usize;
+            let right_local_id = edge.local_ids[1] as usize;
+            let left_sol = match left_local_id {
+                0 => enriched_sol.slice(s![ilelem, 0..enriched_ngp, ..]),
+                1 => enriched_sol.slice(s![ilelem, cell_ngp..; cell_ngp, ..]),
+                2 => enriched_sol.slice(s![ilelem, (-(enriched_ngp as isize)).., ..]),
+                3 => {
+                    enriched_sol.slice(s![ilelem, 0..=(-(enriched_ngp as isize)); enriched_ngp, ..])
+                }
+                _ => panic!("Invalid left local id"),
+            };
+            let right_sol = match right_local_id {
+                0 => enriched_sol.slice(s![irelem, 0..enriched_ngp, ..]),
+                1 => enriched_sol.slice(s![irelem, cell_ngp..; cell_ngp, ..]),
+                2 => enriched_sol.slice(s![irelem, (-(enriched_ngp as isize)).., ..]),
+                3 => {
+                    enriched_sol.slice(s![irelem, 0..=(-(enriched_ngp as isize)); enriched_ngp, ..])
+                }
+                _ => panic!("Invalid right local id"),
+            };
+            let (left_res, right_res) =
+                enriched_residuals.multi_slice_mut((s![ilelem, .., ..], s![irelem, .., ..]));
+            let normal = edge.normal;
+            self.surface_integral(
+                left_sol,
+                right_sol,
+                left_res,
+                right_res,
+                left_elem,
+                right_elem,
+                left_local_id,
+                right_local_id,
+                normal,
+            );
+        }
+    }
     fn volume_integral(
         &mut self,
         sol: ArrayView2<f64>,
@@ -89,8 +199,8 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         for kgp in 0..cell_ngp {
             for igp in 0..cell_ngp {
                 let f: Array1<f64> = space_time_flux1d(sol[[kgp, igp]], self.advection_speed);
-                let transformed_f: Array1<f64> =
-                    elem.jacob_det * f.dot(&elem.jacob_inv_t.slice(s![kgp, igp, .., ..]));
+                let transformed_f: Array1<f64> = elem.jacob_det[[kgp, igp]]
+                    * f.dot(&elem.jacob_inv_t.slice(s![kgp, igp, .., ..]));
                 lfh.slice_mut(s![.., kgp, igp, 0]).assign(&transformed_f);
             }
         }
@@ -101,6 +211,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         res.scaled_add(1.0, &self.stst_kxi_mat.dot(&f_slice));
         res.scaled_add(1.0, &self.stst_kxi_mat.dot(&g_slice));
     }
+    #[allow(clippy::too_many_arguments)]
     fn surface_integral(
         &self,
         left_sol: ArrayView2<f64>,         // (ntgp, neq)

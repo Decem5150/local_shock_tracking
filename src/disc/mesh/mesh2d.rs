@@ -18,7 +18,7 @@ pub struct Element2d {
     pub inodes: Array<usize, Ix1>,
     pub iedges: Array<usize, Ix1>,
     pub ineighbors: Array<isize, Ix1>,
-    pub jacob_det: f64,
+    pub jacob_det: Array<f64, Ix2>,
     pub jacob_inv_t: Array<f64, Ix4>,
 }
 pub struct SubMesh2d {
@@ -63,15 +63,17 @@ impl Mesh2d {
                     ];
 
                     // Calculate determinant (area) - can be used as a check
+                    /*
                     elem.jacob_det = 0.5
                         * ((x[0] * y[1] - x[1] * y[0])
                             + (x[1] * y[2] - x[2] * y[1])
                             + (x[2] * y[3] - x[3] * y[2])
                             + (x[3] * y[0] - x[0] * y[3]))
                             .abs();
-
+                    */
                     // Initialize 4D array for inverse transpose Jacobian at each quadrature point
                     // Dimensions: [xi_points, eta_points, 2, 2] for explicit matrix representation
+                    elem.jacob_det = Array::zeros((ngp, ngp));
                     elem.jacob_inv_t = Array::zeros((ngp, ngp, 2, 2));
 
                     // Evaluate at each quadrature point
@@ -113,6 +115,7 @@ impl Mesh2d {
 
                             // Calculate determinant at this point
                             let det_j = dx_dxi * dy_deta - dx_deta * dy_dxi;
+                            elem.jacob_det[[i, j]] = det_j;
                             let inv_det = 1.0 / det_j;
 
                             // Compute inverse transpose Jacobian with 4D indexing
