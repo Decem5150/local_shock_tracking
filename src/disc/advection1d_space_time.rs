@@ -1,6 +1,7 @@
 pub mod boundary_condition;
 mod flux;
 mod riemann_solver;
+mod shock_tracking;
 use flux::space_time_flux1d;
 use ndarray::{
     Array1, Array2, Array3, Array4, ArrayView1, ArrayView2, ArrayView3, ArrayViewMut2,
@@ -38,6 +39,8 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         let mut residuals: Array3<f64> = Array3::zeros((nelem, cell_ngp * cell_ngp, 1));
         let mut enriched_residuals: Array3<f64> =
             Array3::zeros((nelem, (cell_ngp + 1) * (cell_ngp + 1), 1));
+        let mut assembled_linear_system: Array3<f64> =
+            Array3::zeros((nelem, cell_ngp * cell_ngp, cell_ngp * cell_ngp));
         while self.current_iter < self.solver_param.final_step {
             self.compute_residuals(solutions.view(), residuals.view_mut());
             self.compute_enriched_residuals(solutions.view(), enriched_residuals.view_mut());
@@ -324,5 +327,71 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                     weights[right_kgp] * right_transformed_flux[0] * right_phi;
             }
         }
+    }
+    fn compute_residual_derivatives(
+        &self,
+        sol: ArrayView2<f64>,
+        elem: &Element2d,
+    ) -> (Array2<f64>, Array2<f64>, Array2<f64>) {
+        let cell_ngp = self.solver_param.cell_gp_num;
+        let weights = &self.basis.cell_gauss_weights;
+        let inodes = elem.inodes;
+        let mut x = Array1::zeros(4);
+        let mut y = Array1::zeros(4);
+        let a = self.advection_speed;
+        for i in 0..4 {
+            x[i] = self.mesh.nodes[inodes[i] as usize].x;
+            y[i] = self.mesh.nodes[inodes[i] as usize].y;
+        }
+        let mut dr_du: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, 1));
+        let mut dr_dx: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, 1));
+        let mut dr_dy: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, 1));
+        // derivatives of volume integral
+        for kgp in 0..cell_ngp {
+            for igp in 0..cell_ngp {
+                let u = sol[[igp, kgp]];
+                let xi = self.basis.cell_gauss_points[igp];
+                let eta = self.basis.cell_gauss_points[kgp];
+                let mut dN_dxi: Array1<f64> = Array1::zeros(4);
+                let mut dN_deta: Array1<f64> = Array1::zeros(4);
+                dN_dxi[0] = 0.25 * eta - 0.25;
+                dN_deta[0] = 0.25 * xi - 0.25;
+                dN_dxi[1] = 0.25 * eta + 0.25;
+                dN_deta[1] = 0.25 * xi - 0.25;
+                dN_dxi[2] = 0.25 * eta + 0.25;
+                dN_deta[2] = 0.25 * xi + 0.25;
+                dN_dxi[3] = 0.25 * eta - 0.25;
+                for ibasis in 0..cell_ngp {
+                    let dphi_dxi = self.basis.dphis_cell_gps[[igp, ibasis]];
+                    let dphi_deta = self.basis.dphis_cell_gps[[kgp, ibasis]];
+                    let mut volume_du_sum = 0.0;
+                    let mut volume_dx_sum = 0.0;
+                    let mut volume_dy_sum = 0.0;
+                    for i in 0..4 {
+                        volume_du_sum += y[i]
+                            * (a * dphi_dxi * dN_deta[i] - a * dphi_deta * dN_dxi[i])
+                            + x[i] * (dphi_deta * dN_dxi[i] - dphi_dxi * dN_deta[i]);
+                        volume_dx_sum += u * (dphi_deta * dN_dxi[i] - dphi_dxi * dN_deta[i]);
+                        volume_dy_sum += a * u * (dphi_dxi * dN_deta[i] - dphi_deta * dN_dxi[i]);
+                    }
+                    dr_du[[ibasis, 0]] += weights[igp] * weights[kgp] * volume_du_sum;
+                    dr_dx[[ibasis, 0]] += weights[igp] * weights[kgp] * volume_dx_sum;
+                    dr_dy[[ibasis, 0]] += weights[igp] * weights[kgp] * volume_dy_sum;
+                }
+            }
+        }
+        // derivatives of surface integral
+        for &iedge in self.mesh.internal_edges.iter() {
+            let edge = &self.mesh.edges[iedge];
+            let left_elem = &self.mesh.elements[edge.parent_elements[0] as usize];
+            let right_elem = &self.mesh.elements[edge.parent_elements[1] as usize];
+        }
+        (dr_du, dr_dx, dr_dy)
+    }
+    fn compute_enriched_residual_derivatives(
+        &mut self,
+        solutions: ArrayView3<f64>,
+        mut residuals: ArrayViewMut3<f64>,
+    ) {
     }
 }
