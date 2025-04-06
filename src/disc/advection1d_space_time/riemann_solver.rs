@@ -6,7 +6,7 @@ pub fn smoothed_upwind(
     normal: [f64; 2],
     advection_speed: f64,
 ) -> Array1<f64> {
-    let beta = Array1::from_vec(vec![1.0, advection_speed]);
+    let beta = Array1::from_vec(vec![advection_speed, 1.0]);
     let normal_array = Array1::from(normal.to_vec());
     let result = 0.5
         * (beta.dot(&normal_array) * (&ul + &ur)

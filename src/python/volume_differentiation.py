@@ -1,16 +1,17 @@
 import sympy as sp
 
-i, j, m = sp.symbols('i j m', integer=True, positive=True)
+i, j, m, n = sp.symbols('i j m n', integer=True, positive=True)
 N = sp.Function('N')
 xi, eta = sp.symbols('xi eta')
 alpha = sp.symbols('alpha')
-#x1, x2, x3, x4 = sp.symbols('x1 x2 x3 x4')
-#y1, y2, y3, y4 = sp.symbols('y1 y2 y3 y4')
+x1, x2, x3, x4 = sp.symbols('x1 x2 x3 x4')
+y1, y2, y3, y4 = sp.symbols('y1 y2 y3 y4')
 #x = sp.Function('x')(xi, eta)
 #y = sp.Function('y')(xi, eta)
 x_coords = sp.IndexedBase('x')  # Creates x[i]
 y_coords = sp.IndexedBase('y')  # Creates y[i]
 # Define the bilinear shape functions for a quadrilateral element
+'''
 N1 = 0.25 * (1 - xi) * (1 - eta)
 N2 = 0.25 * (1 + xi) * (1 - eta)
 N3 = 0.25 * (1 + xi) * (1 + eta)
@@ -20,16 +21,17 @@ sp.pprint(N1.diff(xi))
 print("N1.diff(eta):")
 sp.pprint(N1.diff(eta))
 '''
+
 N1 = sp.Function('N1')(xi, eta)
 N2 = sp.Function('N2')(xi, eta)
 N3 = sp.Function('N3')(xi, eta)
 N4 = sp.Function('N4')(xi, eta)
-'''
+
 # Define the mapping from reference (xi, eta) to physical coordinates (x, y)
-#x_expr = N1 * x1 + N2 * x2 + N3 * x3 + N4 * x4
-#y_expr = N1 * y1 + N2 * y2 + N3 * y3 + N4 * y4
-x_expr = sp.Sum(N(i, xi, eta) * x_coords[i], (i, 1, m))
-y_expr = sp.Sum(N(i, xi, eta) * y_coords[i], (i, 1, m))
+x_expr = N1 * x1 + N2 * x2 + N3 * x3 + N4 * x4
+y_expr = N1 * y1 + N2 * y2 + N3 * y3 + N4 * y4
+#x_expr = sp.Sum(N(i, xi, eta) * x_coords[i], (i, 1, m))
+#y_expr = sp.Sum(N(i, xi, eta) * y_coords[i], (i, 1, m))
 # Compute the partial derivatives of the mapping
 '''
 dx_dxi   = sp.diff(x_expr, xi)
@@ -99,14 +101,19 @@ volume_integrand_simplified = sp.simplify(volume_integrand)
 # Output the LaTeX-formatted result
 #print(latex_output)
 
-volume_integrand_x = volume_integrand.diff(x_coords[i])
+volume_integrand_x = volume_integrand.diff(x2)
 volume_integrand_x_simplified = sp.simplify(volume_integrand_x)
 print("volume_integrand_x:")
 sp.pprint(volume_integrand_x_simplified)
-volume_integrand_y = volume_integrand.diff(y_coords[i])
+volume_integrand_y = volume_integrand.diff(y2)
 volume_integrand_y_simplified = sp.simplify(volume_integrand_y)
 print("volume_integrand_y:")
 sp.pprint(volume_integrand_y_simplified)
+'''
+l = sp.IndexedBase('l')
+u = sp.IndexedBase('u')
+enriched_u = sp.Sum(l[i] * u[i], (i, 1, n))
+'''
 volume_integrand_u = volume_integrand.diff(u)
 volume_integrand_u_simplified = sp.simplify(volume_integrand_u)
 print("volume_integrand_u:")

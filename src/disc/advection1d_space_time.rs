@@ -99,14 +99,14 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             let right_local_id = edge.local_ids[1] as usize;
             let left_sol = match left_local_id {
                 0 => solutions.slice(s![ilelem, 0..cell_ngp, ..]),
-                1 => solutions.slice(s![ilelem, cell_ngp..; cell_ngp, ..]),
+                1 => solutions.slice(s![ilelem, (cell_ngp - 1)..; cell_ngp, ..]),
                 2 => solutions.slice(s![ilelem, (-(cell_ngp as isize)).., ..]),
                 3 => solutions.slice(s![ilelem, 0..=(-(cell_ngp as isize)); cell_ngp, ..]),
                 _ => panic!("Invalid left local id"),
             };
             let right_sol = match right_local_id {
                 0 => solutions.slice(s![irelem, 0..cell_ngp, ..]),
-                1 => solutions.slice(s![irelem, cell_ngp..; cell_ngp, ..]),
+                1 => solutions.slice(s![irelem, (cell_ngp - 1)..; cell_ngp, ..]),
                 2 => solutions.slice(s![irelem, (-(cell_ngp as isize)).., ..]),
                 3 => solutions.slice(s![irelem, 0..=(-(cell_ngp as isize)); cell_ngp, ..]),
                 _ => panic!("Invalid right local id"),
@@ -252,7 +252,8 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 let num_flux: Array1<f64> =
                     smoothed_upwind(left_value, right_value, normal, self.advection_speed);
 
-                let left_jacob_inv_t = left_elem.jacob_inv_t.slice(s![kgp, 0, .., ..]);
+                let left_jacob_inv_t: ArrayView2<f64> =
+                    left_elem.jacob_inv_t.slice(s![kgp, 0, .., ..]);
                 let left_n_ref = match left_local_id {
                     0 => [0.0, -1.0], // Bottom edge
                     1 => [1.0, 0.0],  // Right edge
@@ -261,14 +262,15 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                     _ => panic!("Invalid edge"),
                 };
                 let left_n_ref_array = Array1::from_vec(left_n_ref.to_vec());
-                let left_transformed_normal: Array1<f64> = left_n_ref_array.dot(&left_jacob_inv_t);
+                let left_transformed_normal: Array1<f64> = left_jacob_inv_t.dot(&left_n_ref_array);
                 let left_normal_magnitude = (left_transformed_normal[0].powi(2)
                     + left_transformed_normal[1].powi(2))
                 .sqrt();
                 let left_scaling = left_elem.jacob_det * left_normal_magnitude;
                 let left_transformed_flux = left_scaling * &num_flux;
 
-                let right_jacob_inv_t = right_elem.jacob_inv_t.slice(s![kgp, 0, .., ..]);
+                let right_jacob_inv_t: ArrayView2<f64> =
+                    right_elem.jacob_inv_t.slice(s![kgp, 0, .., ..]);
                 let right_n_ref = match right_local_id {
                     0 => [0.0, -1.0], // Bottom edge
                     1 => [1.0, 0.0],  // Right edge
@@ -278,7 +280,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 };
                 let right_n_ref_array = Array1::from_vec(right_n_ref.to_vec());
                 let right_transformed_normal: Array1<f64> =
-                    right_n_ref_array.dot(&right_jacob_inv_t);
+                    right_jacob_inv_t.to_owned().dot(&right_n_ref_array);
                 let right_normal_magnitude = (right_transformed_normal[0].powi(2)
                     + right_transformed_normal[1].powi(2))
                 .sqrt();
@@ -328,14 +330,15 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             }
         }
     }
-    fn compute_residual_derivatives(
+    fn volume_residual_derivatives(
         &self,
         sol: ArrayView2<f64>,
-        elem: &Element2d,
-    ) -> (Array2<f64>, Array2<f64>, Array2<f64>) {
+        ielem: usize,
+    ) -> (Array3<f64>, Array3<f64>, Array3<f64>) {
+        let elem = &self.mesh.elements[ielem];
         let cell_ngp = self.solver_param.cell_gp_num;
         let weights = &self.basis.cell_gauss_weights;
-        let inodes = elem.inodes;
+        let inodes = &elem.inodes;
         let mut x = Array1::zeros(4);
         let mut y = Array1::zeros(4);
         let a = self.advection_speed;
@@ -343,55 +346,250 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             x[i] = self.mesh.nodes[inodes[i] as usize].x;
             y[i] = self.mesh.nodes[inodes[i] as usize].y;
         }
-        let mut dr_du: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, 1));
-        let mut dr_dx: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, 1));
-        let mut dr_dy: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, 1));
+        let mut dr_du: Array3<f64> = Array3::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp, 1)); // (ntest_func, ntrial_func, neq)
+        let mut dr_dx: Array3<f64> = Array3::zeros((cell_ngp * cell_ngp, 4, 1)); // (ntest_func, ntrial_func, neq)
+        let mut dr_dy: Array3<f64> = Array3::zeros((cell_ngp * cell_ngp, 4, 1)); // (ntest_func, ntrial_func, neq)
         // derivatives of volume integral
         for kgp in 0..cell_ngp {
             for igp in 0..cell_ngp {
                 let u = sol[[igp, kgp]];
                 let xi = self.basis.cell_gauss_points[igp];
                 let eta = self.basis.cell_gauss_points[kgp];
-                let mut dN_dxi: Array1<f64> = Array1::zeros(4);
-                let mut dN_deta: Array1<f64> = Array1::zeros(4);
-                dN_dxi[0] = 0.25 * eta - 0.25;
-                dN_deta[0] = 0.25 * xi - 0.25;
-                dN_dxi[1] = 0.25 * eta + 0.25;
-                dN_deta[1] = 0.25 * xi - 0.25;
-                dN_dxi[2] = 0.25 * eta + 0.25;
-                dN_deta[2] = 0.25 * xi + 0.25;
-                dN_dxi[3] = 0.25 * eta - 0.25;
-                for ibasis in 0..cell_ngp {
-                    let dphi_dxi = self.basis.dphis_cell_gps[[igp, ibasis]];
-                    let dphi_deta = self.basis.dphis_cell_gps[[kgp, ibasis]];
-                    let mut volume_du_sum = 0.0;
-                    let mut volume_dx_sum = 0.0;
-                    let mut volume_dy_sum = 0.0;
-                    for i in 0..4 {
-                        volume_du_sum += y[i]
-                            * (a * dphi_dxi * dN_deta[i] - a * dphi_deta * dN_dxi[i])
-                            + x[i] * (dphi_deta * dN_dxi[i] - dphi_dxi * dN_deta[i]);
-                        volume_dx_sum += u * (dphi_deta * dN_dxi[i] - dphi_dxi * dN_deta[i]);
-                        volume_dy_sum += a * u * (dphi_dxi * dN_deta[i] - dphi_deta * dN_dxi[i]);
+                let mut dn_dxi: Array1<f64> = Array1::zeros(4);
+                let mut dn_deta: Array1<f64> = Array1::zeros(4);
+                dn_dxi[0] = 0.25 * eta - 0.25;
+                dn_deta[0] = 0.25 * xi - 0.25;
+                dn_dxi[1] = 0.25 * eta + 0.25;
+                dn_deta[1] = 0.25 * xi - 0.25;
+                dn_dxi[2] = 0.25 * eta + 0.25;
+                dn_deta[2] = 0.25 * xi + 0.25;
+                dn_dxi[3] = 0.25 * eta - 0.25;
+                dn_deta[3] = 0.25 * xi + 0.25;
+                let y_dot_dn_dxi = y.dot(&dn_dxi);
+                let x_dot_dn_dxi = x.dot(&dn_dxi);
+                let y_dot_dn_deta = y.dot(&dn_deta);
+                let x_dot_dn_deta = x.dot(&dn_deta);
+                for itest_func in 0..(cell_ngp * cell_ngp) {
+                    let itest_func_x = itest_func % cell_ngp; // spatial index
+                    let itest_func_t = itest_func / cell_ngp; // temporal index
+                    let test_func_xi = self.basis.phis_cell_gps[[igp, itest_func_x]];
+                    let test_func_eta = self.basis.phis_cell_gps[[kgp, itest_func_t]];
+                    let dtest_func_dxi = self.basis.dphis_cell_gps[[igp, itest_func_x]];
+                    let dtest_func_deta = self.basis.dphis_cell_gps[[kgp, itest_func_t]];
+                    for itrial_func in 0..(cell_ngp * cell_ngp) {
+                        let itrial_func_x = itrial_func % cell_ngp; // spatial index
+                        let itrial_func_t = itrial_func / cell_ngp; // temporal index
+                        let trial_func_xi = self.basis.phis_cell_gps[[igp, itrial_func_x]];
+                        let trial_func_eta = self.basis.phis_cell_gps[[kgp, itrial_func_t]];
+                        dr_du[[itest_func, itrial_func, 0]] += (weights[igp] * weights[kgp])
+                            * (trial_func_xi * trial_func_eta)
+                            * ((test_func_xi * dtest_func_deta)
+                                * ((-a * y_dot_dn_dxi) + x_dot_dn_dxi)
+                                - (test_func_eta * dtest_func_dxi)
+                                    * ((-a * x_dot_dn_deta) + y_dot_dn_deta));
                     }
-                    dr_du[[ibasis, 0]] += weights[igp] * weights[kgp] * volume_du_sum;
-                    dr_dx[[ibasis, 0]] += weights[igp] * weights[kgp] * volume_dx_sum;
-                    dr_dy[[ibasis, 0]] += weights[igp] * weights[kgp] * volume_dy_sum;
+
+                    for inode in 0..4 {
+                        dr_dx[[itest_func, inode, 0]] += (weights[igp] * weights[kgp])
+                            * u
+                            * (test_func_xi * dtest_func_deta * dn_dxi[inode]
+                                - test_func_eta * dtest_func_dxi * dn_deta[inode]);
+                        dr_dy[[itest_func, inode, 0]] += (weights[igp] * weights[kgp])
+                            * (a * u)
+                            * (test_func_eta * dtest_func_dxi * dn_deta[inode]
+                                - test_func_xi * dtest_func_deta * dn_dxi[inode]);
+                    }
                 }
             }
         }
-        // derivatives of surface integral
-        for &iedge in self.mesh.internal_edges.iter() {
-            let edge = &self.mesh.edges[iedge];
-            let left_elem = &self.mesh.elements[edge.parent_elements[0] as usize];
-            let right_elem = &self.mesh.elements[edge.parent_elements[1] as usize];
-        }
         (dr_du, dr_dx, dr_dy)
     }
-    fn compute_enriched_residual_derivatives(
-        &mut self,
-        solutions: ArrayView3<f64>,
-        mut residuals: ArrayViewMut3<f64>,
+    fn volume_enriched_residual_derivatives(
+        &self,
+        enriched_sol: ArrayView2<f64>,
+        ielem: usize,
+    ) -> (Array3<f64>, Array3<f64>, Array3<f64>) {
+        let elem = &self.mesh.elements[ielem];
+        let cell_ngp = self.solver_param.cell_gp_num;
+        let enriched_ngp = cell_ngp + 1;
+        let weights = &self.enriched_basis.cell_gauss_weights;
+        let inodes = &elem.inodes;
+        let mut x = Array1::zeros(4);
+        let mut y = Array1::zeros(4);
+        let a = self.advection_speed;
+        for i in 0..4 {
+            x[i] = self.mesh.nodes[inodes[i] as usize].x;
+            y[i] = self.mesh.nodes[inodes[i] as usize].y;
+        }
+        let mut denrr_du: Array3<f64> =
+            Array3::zeros((enriched_ngp * enriched_ngp, cell_ngp * cell_ngp, 1));
+        let mut denrr_dx: Array3<f64> = Array3::zeros((enriched_ngp * enriched_ngp, 4, 1));
+        let mut denrr_dy: Array3<f64> = Array3::zeros((enriched_ngp * enriched_ngp, 4, 1));
+        // derivatives of volume integral
+        for kgp in 0..enriched_ngp {
+            for igp in 0..enriched_ngp {
+                let u = enriched_sol[[kgp, igp]];
+                let xi = self.enriched_basis.cell_gauss_points[igp];
+                let eta = self.enriched_basis.cell_gauss_points[kgp];
+                let mut dn_dxi: Array1<f64> = Array1::zeros(4);
+                let mut dn_deta: Array1<f64> = Array1::zeros(4);
+                dn_dxi[0] = 0.25 * eta - 0.25;
+                dn_deta[0] = 0.25 * xi - 0.25;
+                dn_dxi[1] = 0.25 * eta + 0.25;
+                dn_deta[1] = 0.25 * xi - 0.25;
+                dn_dxi[2] = 0.25 * eta + 0.25;
+                dn_deta[2] = 0.25 * xi + 0.25;
+                dn_dxi[3] = 0.25 * eta - 0.25;
+                dn_deta[3] = 0.25 * xi + 0.25;
+                let y_dot_dn_dxi = y.dot(&dn_dxi);
+                let x_dot_dn_dxi = x.dot(&dn_dxi);
+                let y_dot_dn_deta = y.dot(&dn_deta);
+                let x_dot_dn_deta = x.dot(&dn_deta);
+                for itest_func in 0..(cell_ngp + 1) * (cell_ngp + 1) {
+                    let itest_func_x = itest_func % cell_ngp; // spatial index
+                    let itest_func_t = itest_func / cell_ngp; // temporal index
+                    let test_func_xi = self.enriched_basis.phis_cell_gps[[igp, itest_func_x]];
+                    let test_func_eta = self.enriched_basis.phis_cell_gps[[kgp, itest_func_t]];
+                    let dtest_func_dxi = self.enriched_basis.dphis_cell_gps[[igp, itest_func_x]];
+                    let dtest_func_deta = self.enriched_basis.dphis_cell_gps[[kgp, itest_func_t]];
+                    for itrial_func in 0..(cell_ngp * cell_ngp) {
+                        let itrial_func_x = itrial_func % cell_ngp; // spatial index
+                        let itrial_func_t = itrial_func / cell_ngp; // temporal index
+                        let trial_func_xi = self.basis.phis_cell_gps[[igp, itrial_func_x]];
+                        let trial_func_eta = self.basis.phis_cell_gps[[kgp, itrial_func_t]];
+                        denrr_du[[itest_func, itrial_func, 0]] += (weights[igp] * weights[kgp])
+                            * (trial_func_xi * trial_func_eta)
+                            * ((test_func_xi * dtest_func_deta)
+                                * ((-a * y_dot_dn_dxi) + x_dot_dn_dxi)
+                                - (test_func_eta * dtest_func_dxi)
+                                    * ((-a * x_dot_dn_deta) + y_dot_dn_deta));
+                    }
+
+                    for inode in 0..4 {
+                        denrr_dx[[itest_func, inode, 0]] += (weights[igp] * weights[kgp])
+                            * u
+                            * (test_func_xi * dtest_func_deta * dn_dxi[inode]
+                                - test_func_eta * dtest_func_dxi * dn_deta[inode]);
+                        denrr_dy[[itest_func, inode, 0]] += (weights[igp] * weights[kgp])
+                            * (a * u)
+                            * (test_func_eta * dtest_func_dxi * dn_deta[inode]
+                                - test_func_xi * dtest_func_deta * dn_dxi[inode]);
+                    }
+                }
+            }
+        }
+        (denrr_du, denrr_dx, denrr_dy)
+    }
+    fn surface_residual_derivatives(
+        &self,
+        sol: ArrayView3<f64>,
+        iedge: usize,
+    ) -> (
+        Array3<f64>,
+        Array3<f64>,
+        Array3<f64>,
+        Array3<f64>,
+        Array3<f64>,
+        Array3<f64>,
     ) {
+        let edge = &self.mesh.edges[iedge];
+        let ilelem = edge.parent_elements[0];
+        let irelem = edge.parent_elements[1];
+        let left_elem = &self.mesh.elements[ilelem as usize];
+        let right_elem = &self.mesh.elements[irelem as usize];
+        let left_local_id = edge.local_ids[0] as usize;
+        let right_local_id = edge.local_ids[1] as usize;
+        let cell_ngp = self.solver_param.cell_gp_num;
+        let weights = &self.basis.cell_gauss_weights;
+        let left_sol = match left_local_id {
+            0 => sol.slice(s![ilelem, 0..cell_ngp, ..]),
+            1 => sol.slice(s![ilelem, (cell_ngp - 1)..; cell_ngp, ..]),
+            2 => sol.slice(s![ilelem, (-(cell_ngp as isize)).., ..]),
+            3 => sol.slice(s![ilelem, 0..=(-(cell_ngp as isize)); cell_ngp, ..]),
+            _ => panic!("Invalid left local id"),
+        };
+        let right_sol = match right_local_id {
+            0 => sol.slice(s![irelem, 0..cell_ngp, ..]),
+            1 => sol.slice(s![irelem, (cell_ngp - 1)..; cell_ngp, ..]),
+            2 => sol.slice(s![irelem, (-(cell_ngp as isize)).., ..]),
+            3 => sol.slice(s![irelem, 0..=(-(cell_ngp as isize)); cell_ngp, ..]),
+            _ => panic!("Invalid right local id"),
+        };
+        let normal = edge.normal;
+        let mut left_dr_du: Array3<f64> =
+            Array3::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp, 1)); // (ntest_func, ntrial_func, neq)
+        let mut left_dr_dx: Array3<f64> = Array3::zeros((cell_ngp * cell_ngp, 4, 1)); // (ntest_func, ntrial_func, neq)
+        let mut left_dr_dy: Array3<f64> = Array3::zeros((cell_ngp * cell_ngp, 4, 1)); // (ntest_func, ntrial_func, neq)
+        let mut right_dr_du: Array3<f64> =
+            Array3::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp, 1)); // (ntest_func, ntrial_func, neq)
+        let mut right_dr_dx: Array3<f64> = Array3::zeros((cell_ngp * cell_ngp, 4, 1)); // (ntest_func, ntrial_func, neq)
+        let mut right_dr_dy: Array3<f64> = Array3::zeros((cell_ngp * cell_ngp, 4, 1)); // (ntest_func, ntrial_func, neq)
+        for kgp in 0..cell_ngp {
+            // Map quadrature points based on edge orientation
+            let left_kgp = match left_local_id {
+                0 => kgp,                // Bottom: natural order
+                1 => kgp,                // Right: natural order
+                2 => cell_ngp - 1 - kgp, // Top: reversed
+                3 => cell_ngp - 1 - kgp, // Left: reversed
+                _ => panic!("Invalid edge"),
+            };
+            let right_kgp = match right_local_id {
+                0 => kgp,                // Bottom: natural order
+                1 => kgp,                // Right: natural order
+                2 => cell_ngp - 1 - kgp, // Top: reversed
+                3 => cell_ngp - 1 - kgp, // Left: reversed
+                _ => panic!("Invalid edge"),
+            };
+            for itest_func in 0..(cell_ngp * cell_ngp) {
+                let itest_func_x = itest_func % cell_ngp; // spatial index
+                let itest_func_t = itest_func / cell_ngp; // temporal index
+                let (test_func_xi, test_func_eta) = match left_local_id {
+                    0 => (
+                        self.basis.phis_cell_gps[[left_kgp, itest_func_x]],
+                        self.basis.phis_cell_gps[[0, itest_func_t]],
+                    ),
+                    1 => (
+                        self.basis.phis_cell_gps[[cell_ngp - 1, itest_func_x]],
+                        self.basis.phis_cell_gps[[left_kgp, itest_func_t]],
+                    ),
+                    2 => (
+                        self.basis.phis_cell_gps[[left_kgp, itest_func_t]],
+                        self.basis.phis_cell_gps[[cell_ngp - 1, itest_func_x]],
+                    ),
+                    3 => (
+                        self.basis.phis_cell_gps[[0, itest_func_t]],
+                        self.basis.phis_cell_gps[[left_kgp, itest_func_x]],
+                    ),
+                    _ => panic!("Invalid left local id"),
+                };
+                let (right_test_func_xi, right_test_func_eta) = match right_local_id {
+                    0 => (
+                        self.basis.phis_cell_gps[[right_kgp, itest_func_x]],
+                        self.basis.phis_cell_gps[[0, itest_func_t]],
+                    ),
+                    1 => (
+                        self.basis.phis_cell_gps[[cell_ngp - 1, itest_func_x]],
+                        self.basis.phis_cell_gps[[right_kgp, itest_func_t]],
+                    ),
+                    2 => (
+                        self.basis.phis_cell_gps[[right_kgp, itest_func_t]],
+                        self.basis.phis_cell_gps[[cell_ngp - 1, itest_func_x]],
+                    ),
+                    3 => (
+                        self.basis.phis_cell_gps[[0, itest_func_t]],
+                        self.basis.phis_cell_gps[[right_kgp, itest_func_x]],
+                    ),
+                    _ => panic!("Invalid right local id"),
+                };
+            }
+        }
+        (
+            left_dr_du,
+            left_dr_dx,
+            left_dr_dy,
+            right_dr_du,
+            right_dr_dx,
+            right_dr_dy,
+        )
     }
 }

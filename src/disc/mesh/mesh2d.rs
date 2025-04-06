@@ -38,6 +38,15 @@ pub struct Mesh2d {
     pub node_num: usize,
 }
 impl Mesh2d {
+    fn compute_normal(&mut self) {
+        for edge in self.edges.iter_mut() {
+            let inodes: ArrayView1<usize> = edge.inodes.view();
+            let x = [self.nodes[inodes[0]].x, self.nodes[inodes[1]].x];
+            let y = [self.nodes[inodes[0]].y, self.nodes[inodes[1]].y];
+            let normal = [y[1] - y[0], x[0] - x[1]];
+            edge.normal = normal;
+        }
+    }
     fn compute_jacob(&mut self, basis: &LagrangeBasis1DLobatto) {
         let ngp = basis.cell_gauss_points.len();
 
