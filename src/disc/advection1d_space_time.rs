@@ -97,6 +97,9 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             let right_elem = &self.mesh.elements[irelem as usize];
             let left_local_id = edge.local_ids[0] as usize;
             let right_local_id = edge.local_ids[1] as usize;
+            let left_sol = solutions.slice(s![ilelem, (cell_ngp - 1)..; cell_ngp, ..]);
+            let right_sol = solutions.slice(s![irelem, 0..=(-(cell_ngp as isize)); cell_ngp, ..]);
+            /*
             let left_sol = match left_local_id {
                 0 => solutions.slice(s![ilelem, 0..cell_ngp, ..]),
                 1 => solutions.slice(s![ilelem, (cell_ngp - 1)..; cell_ngp, ..]),
@@ -111,6 +114,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 3 => solutions.slice(s![irelem, 0..=(-(cell_ngp as isize)); cell_ngp, ..]),
                 _ => panic!("Invalid right local id"),
             };
+            */
             let (left_res, right_res) =
                 residuals.multi_slice_mut((s![ilelem, .., ..], s![irelem, .., ..]));
             let normal = edge.normal;
@@ -157,6 +161,10 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             let right_elem = &self.mesh.elements[irelem as usize];
             let left_local_id = edge.local_ids[0] as usize;
             let right_local_id = edge.local_ids[1] as usize;
+            let left_sol = enriched_sol.slice(s![ilelem, (cell_ngp - 1)..; cell_ngp, ..]);
+            let right_sol =
+                enriched_sol.slice(s![irelem, 0..=(-(cell_ngp as isize)); cell_ngp, ..]);
+            /*
             let left_sol = match left_local_id {
                 0 => enriched_sol.slice(s![ilelem, 0..enriched_ngp, ..]),
                 1 => enriched_sol.slice(s![ilelem, cell_ngp..; cell_ngp, ..]),
@@ -175,6 +183,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 }
                 _ => panic!("Invalid right local id"),
             };
+            */
             let (left_res, right_res) =
                 enriched_residuals.multi_slice_mut((s![ilelem, .., ..], s![irelem, .., ..]));
             let normal = edge.normal;
@@ -232,6 +241,9 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         for ibasis in 0..cell_ngp {
             for kgp in 0..cell_ngp {
                 // Map quadrature points based on edge orientation
+                let left_kgp = kgp;
+                let right_kgp = kgp;
+                /*
                 let left_kgp = match left_local_id {
                     0 => kgp,                // Bottom: natural order
                     1 => kgp,                // Right: natural order
@@ -246,14 +258,16 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                     3 => cell_ngp - 1 - kgp, // Left: reversed
                     _ => panic!("Invalid edge"),
                 };
-
-                let left_value: ArrayView1<f64> = left_sol.slice(s![left_kgp, ..]);
-                let right_value: ArrayView1<f64> = right_sol.slice(s![right_kgp, ..]);
-                let num_flux: Array1<f64> =
-                    smoothed_upwind(left_value, right_value, normal, self.advection_speed);
+                */
+                let left_value: ArrayView1<f64> = left_sol.slice(s![kgp, ..]);
+                let right_value: ArrayView1<f64> = right_sol.slice(s![kgp, ..]);
+                let num_flux =
+                    smoothed_upwind(left_value[0], right_value[0], normal, self.advection_speed);
 
                 let left_jacob_inv_t: ArrayView2<f64> =
                     left_elem.jacob_inv_t.slice(s![kgp, 0, .., ..]);
+                let left_n_ref = [1.0, 0.0];
+                /*
                 let left_n_ref = match left_local_id {
                     0 => [0.0, -1.0], // Bottom edge
                     1 => [1.0, 0.0],  // Right edge
@@ -261,6 +275,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                     3 => [-1.0, 0.0], // Left edge
                     _ => panic!("Invalid edge"),
                 };
+                */
                 let left_n_ref_array = Array1::from_vec(left_n_ref.to_vec());
                 let left_transformed_normal: Array1<f64> = left_jacob_inv_t.dot(&left_n_ref_array);
                 let left_normal_magnitude = (left_transformed_normal[0].powi(2)
@@ -271,6 +286,8 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
 
                 let right_jacob_inv_t: ArrayView2<f64> =
                     right_elem.jacob_inv_t.slice(s![kgp, 0, .., ..]);
+                let right_n_ref = [-1.0, 0.0];
+                /*
                 let right_n_ref = match right_local_id {
                     0 => [0.0, -1.0], // Bottom edge
                     1 => [1.0, 0.0],  // Right edge
@@ -278,6 +295,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                     3 => [-1.0, 0.0], // Left edge
                     _ => panic!("Invalid edge"),
                 };
+                */
                 let right_n_ref_array = Array1::from_vec(right_n_ref.to_vec());
                 let right_transformed_normal: Array1<f64> =
                     right_jacob_inv_t.to_owned().dot(&right_n_ref_array);
@@ -286,6 +304,11 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 .sqrt();
                 let right_scaling = right_elem.jacob_det * right_normal_magnitude;
                 let right_transformed_flux = right_scaling * &num_flux;
+                let left_phi = self.basis.phis_cell_gps[[cell_ngp - 1, ibasis]]
+                    * self.basis.phis_cell_gps[[left_kgp, ibasis]];
+                let right_phi = self.basis.phis_cell_gps[[0, ibasis]]
+                    * self.basis.phis_cell_gps[[right_kgp, ibasis]];
+                /*
                 let left_phi = match left_local_id {
                     0 => {
                         self.basis.phis_cell_gps[[left_kgp, ibasis]]
@@ -324,6 +347,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                     }
                     _ => panic!("Invalid edge"),
                 };
+                */
                 left_res[[ibasis, 0]] -= weights[left_kgp] * left_transformed_flux[0] * left_phi;
                 right_res[[ibasis, 0]] +=
                     weights[right_kgp] * right_transformed_flux[0] * right_phi;
@@ -501,6 +525,9 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         let right_local_id = edge.local_ids[1] as usize;
         let cell_ngp = self.solver_param.cell_gp_num;
         let weights = &self.basis.cell_gauss_weights;
+        let left_sol = sol.slice(s![ilelem, (cell_ngp - 1)..; cell_ngp, ..]);
+        let right_sol = sol.slice(s![irelem, 0..=(-(cell_ngp as isize)); cell_ngp, ..]);
+        /*
         let left_sol = match left_local_id {
             0 => sol.slice(s![ilelem, 0..cell_ngp, ..]),
             1 => sol.slice(s![ilelem, (cell_ngp - 1)..; cell_ngp, ..]),
@@ -515,7 +542,10 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             3 => sol.slice(s![irelem, 0..=(-(cell_ngp as isize)); cell_ngp, ..]),
             _ => panic!("Invalid right local id"),
         };
+        */
         let normal = edge.normal;
+        let left_n_ref = [1.0, 0.0];
+        let right_n_ref = [-1.0, 0.0];
         let mut left_dr_du: Array3<f64> =
             Array3::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp, 1)); // (ntest_func, ntrial_func, neq)
         let mut left_dr_dx: Array3<f64> = Array3::zeros((cell_ngp * cell_ngp, 4, 1)); // (ntest_func, ntrial_func, neq)
@@ -524,8 +554,60 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             Array3::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp, 1)); // (ntest_func, ntrial_func, neq)
         let mut right_dr_dx: Array3<f64> = Array3::zeros((cell_ngp * cell_ngp, 4, 1)); // (ntest_func, ntrial_func, neq)
         let mut right_dr_dy: Array3<f64> = Array3::zeros((cell_ngp * cell_ngp, 4, 1)); // (ntest_func, ntrial_func, neq)
+        let mut left_x = Array1::zeros(4);
+        let mut left_y = Array1::zeros(4);
+        let mut right_x = Array1::zeros(4);
+        let mut right_y = Array1::zeros(4);
+        for i in 0..4 {
+            left_x[i] = self.mesh.nodes[left_elem.inodes[i] as usize].x;
+            left_y[i] = self.mesh.nodes[left_elem.inodes[i] as usize].y;
+            right_x[i] = self.mesh.nodes[right_elem.inodes[i] as usize].x;
+            right_y[i] = self.mesh.nodes[right_elem.inodes[i] as usize].y;
+        }
         for kgp in 0..cell_ngp {
+            let left_kgp = kgp;
+            let right_kgp = kgp;
+            let left_value = left_sol.slice(s![kgp, ..]);
+            let right_value = right_sol.slice(s![kgp, ..]);
+            let left_jacob_det = left_elem.jacob_det[[kgp, cell_ngp - 1]];
+            let right_jacob_det = right_elem.jacob_det[[kgp, 0]];
+            let left_jacob_inv_t = left_elem.jacob_inv_t.slice(s![kgp, cell_ngp - 1, .., ..]);
+            let right_jacob_inv_t = right_elem.jacob_inv_t.slice(s![kgp, 0, .., ..]);
+            let left_xi = self.basis.cell_gauss_points[cell_ngp - 1];
+            let right_xi = self.basis.cell_gauss_points[0];
+            let left_eta = self.basis.cell_gauss_points[kgp];
+            let right_eta = self.basis.cell_gauss_points[kgp];
+            let mut left_dn_dxi: Array1<f64> = Array1::zeros(4);
+            let mut left_dn_deta: Array1<f64> = Array1::zeros(4);
+            left_dn_dxi[0] = 0.25 * left_eta - 0.25;
+            left_dn_deta[0] = 0.25 * left_xi - 0.25;
+            left_dn_dxi[1] = 0.25 * left_eta + 0.25;
+            left_dn_deta[1] = 0.25 * left_xi - 0.25;
+            left_dn_dxi[2] = 0.25 * left_eta + 0.25;
+            left_dn_deta[2] = 0.25 * left_xi + 0.25;
+            left_dn_dxi[3] = 0.25 * left_eta - 0.25;
+            left_dn_deta[3] = 0.25 * left_xi + 0.25;
+            let left_y_dot_dn_dxi = left_y.dot(&left_dn_dxi);
+            let left_x_dot_dn_dxi = left_x.dot(&left_dn_dxi);
+            let left_y_dot_dn_deta = left_y.dot(&left_dn_deta);
+            let left_x_dot_dn_deta = left_x.dot(&left_dn_deta);
+            let mut right_dn_dxi: Array1<f64> = Array1::zeros(4);
+            let mut right_dn_deta: Array1<f64> = Array1::zeros(4);
+            right_dn_dxi[0] = 0.25 * right_eta - 0.25;
+            right_dn_deta[0] = 0.25 * right_xi - 0.25;
+            right_dn_dxi[1] = 0.25 * right_eta + 0.25;
+            right_dn_deta[1] = 0.25 * right_xi - 0.25;
+            right_dn_dxi[2] = 0.25 * right_eta + 0.25;
+            right_dn_deta[2] = 0.25 * right_xi + 0.25;
+            right_dn_dxi[3] = 0.25 * right_eta - 0.25;
+            right_dn_deta[3] = 0.25 * right_xi + 0.25;
+            let right_y_dot_dn_dxi = right_y.dot(&right_dn_dxi);
+            let right_x_dot_dn_dxi = right_x.dot(&right_dn_dxi);
+            let right_y_dot_dn_deta = right_y.dot(&right_dn_deta);
+            let right_x_dot_dn_deta = right_x.dot(&right_dn_deta);
+
             // Map quadrature points based on edge orientation
+            /*
             let left_kgp = match left_local_id {
                 0 => kgp,                // Bottom: natural order
                 1 => kgp,                // Right: natural order
@@ -540,9 +622,15 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 3 => cell_ngp - 1 - kgp, // Left: reversed
                 _ => panic!("Invalid edge"),
             };
+            */
             for itest_func in 0..(cell_ngp * cell_ngp) {
                 let itest_func_x = itest_func % cell_ngp; // spatial index
                 let itest_func_t = itest_func / cell_ngp; // temporal index
+                let left_phi = self.basis.phis_cell_gps[[cell_ngp - 1, itest_func_x]]
+                    * self.basis.phis_cell_gps[[left_kgp, itest_func_t]];
+                let right_phi = self.basis.phis_cell_gps[[0, itest_func_x]]
+                    * self.basis.phis_cell_gps[[right_kgp, itest_func_t]];
+                /*
                 let (test_func_xi, test_func_eta) = match left_local_id {
                     0 => (
                         self.basis.phis_cell_gps[[left_kgp, itest_func_x]],
@@ -576,11 +664,103 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                         self.basis.phis_cell_gps[[cell_ngp - 1, itest_func_x]],
                     ),
                     3 => (
-                        self.basis.phis_cell_gps[[0, itest_func_t]],
-                        self.basis.phis_cell_gps[[right_kgp, itest_func_x]],
+                        self.basis.phis_cell_gps[[0, itest_func_x]],
+                        self.basis.phis_cell_gps[[right_kgp, itest_func_t]],
                     ),
                     _ => panic!("Invalid right local id"),
                 };
+                */
+                let numerical_flux = riemann_solver::smoothed_upwind(
+                    left_value[0],
+                    right_value[0],
+                    normal,
+                    self.advection_speed,
+                );
+                let dflux_dul = riemann_solver::dflux_dul(normal, self.advection_speed);
+                let dflux_dur = riemann_solver::dflux_dur(normal, self.advection_speed);
+                let (dflux_dnx, dflux_dny) = riemann_solver::dflux_dnormal(
+                    left_value[0],
+                    right_value[0],
+                    normal,
+                    self.advection_speed,
+                );
+                let left_n_ref_array: Array1<f64> = Array1::from_vec(left_n_ref.to_vec());
+                let left_transformed_normal: Array1<f64> = left_jacob_inv_t.dot(&left_n_ref_array);
+                let left_normal_magnitude = (left_transformed_normal[0].powi(2)
+                    + left_transformed_normal[1].powi(2))
+                .sqrt();
+                let left_scaling = left_jacob_det * left_normal_magnitude;
+
+                let right_n_ref_array: Array1<f64> = Array1::from_vec(right_n_ref.to_vec());
+                let right_transformed_normal: Array1<f64> =
+                    right_jacob_inv_t.dot(&right_n_ref_array);
+                let right_normal_magnitude = (right_transformed_normal[0].powi(2)
+                    + right_transformed_normal[1].powi(2))
+                .sqrt();
+                let right_scaling = right_jacob_det * right_normal_magnitude;
+
+                left_dr_du[[itest_func, cell_ngp - 1 + kgp * cell_ngp, 0]] =
+                    left_scaling * dflux_dul * left_phi;
+                right_dr_du[[itest_func, kgp * cell_ngp, 0]] =
+                    right_scaling * (-dflux_dur) * right_phi;
+                for inode in 0..4 {
+                    let left_scaling_x_i = {
+                        let numerator = (left_n_ref[0] * left_x_dot_dn_deta
+                            - left_n_ref[1] * left_x_dot_dn_dxi)
+                            * (left_n_ref[0] * left_dn_deta[inode]
+                                - left_n_ref[1] * left_dn_dxi[inode]);
+                        let denominator = ((left_n_ref[0] * left_x_dot_dn_deta
+                            - left_n_ref[1] * left_x_dot_dn_dxi)
+                            .powf(2.0)
+                            + (left_n_ref[0] * left_y_dot_dn_deta
+                                - left_n_ref[1] * left_y_dot_dn_dxi)
+                                .powf(2.0))
+                        .sqrt();
+                        numerator / denominator
+                    };
+                    let left_scaling_y_i = {
+                        let numerator = (left_n_ref[0] * left_y_dot_dn_deta
+                            - left_n_ref[1] * left_y_dot_dn_dxi)
+                            * (left_n_ref[0] * left_dn_deta[inode]
+                                - left_n_ref[1] * left_dn_dxi[inode]);
+                        let denominator = ((left_n_ref[0] * left_x_dot_dn_deta
+                            - left_n_ref[1] * left_x_dot_dn_dxi)
+                            .powf(2.0)
+                            + (left_n_ref[0] * left_y_dot_dn_deta
+                                - left_n_ref[1] * left_y_dot_dn_dxi)
+                                .powf(2.0))
+                        .sqrt();
+                        numerator / denominator
+                    };
+                    let right_scaling_x_i = {
+                        let numerator = (right_n_ref[0] * right_x_dot_dn_deta
+                            - right_n_ref[1] * right_x_dot_dn_dxi)
+                            * (right_n_ref[0] * right_dn_deta[inode]
+                                - right_n_ref[1] * right_dn_dxi[inode]);
+                        let denominator = ((right_n_ref[0] * right_x_dot_dn_deta
+                            - right_n_ref[1] * right_x_dot_dn_dxi)
+                            .powf(2.0)
+                            + (right_n_ref[0] * right_y_dot_dn_deta
+                                - right_n_ref[1] * right_y_dot_dn_dxi)
+                                .powf(2.0))
+                        .sqrt();
+                        numerator / denominator
+                    };
+                    let right_scaling_y_i = {
+                        let numerator = (right_n_ref[0] * right_y_dot_dn_deta
+                            - right_n_ref[1] * right_y_dot_dn_dxi)
+                            * (right_n_ref[0] * right_dn_deta[inode]
+                                - right_n_ref[1] * right_dn_dxi[inode]);
+                        let denominator = ((right_n_ref[0] * right_x_dot_dn_deta
+                            - right_n_ref[1] * right_x_dot_dn_dxi)
+                            .powf(2.0)
+                            + (right_n_ref[0] * right_y_dot_dn_deta
+                                - right_n_ref[1] * right_y_dot_dn_dxi)
+                                .powf(2.0))
+                        .sqrt();
+                        numerator / denominator
+                    };
+                }
             }
         }
         (

@@ -87,10 +87,10 @@ impl Mesh2d {
 
                     // Evaluate at each quadrature point
                     for i in 0..ngp {
-                        let xi = basis.cell_gauss_points[i];
+                        let eta = basis.cell_gauss_points[i];
 
                         for j in 0..ngp {
-                            let eta = basis.cell_gauss_points[j];
+                            let xi = basis.cell_gauss_points[j];
 
                             // Shape function derivatives at this quadrature point
                             // dN/dξ values
