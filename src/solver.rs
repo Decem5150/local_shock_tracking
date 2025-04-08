@@ -1,5 +1,8 @@
 use crate::disc::{
-    basis::lagrange1d::LagrangeBasis1DLobatto, burgers1d::Disc1dBurgers, mesh::mesh1d::Mesh1d,
+    advection1d_space_time::Disc1dAdvectionSpaceTime,
+    basis::lagrange1d::LagrangeBasis1DLobatto,
+    burgers1d::Disc1dBurgers,
+    mesh::{mesh1d::Mesh1d, mesh2d::Mesh2d},
 };
 use ndarray::{Array, Array3, Ix3};
 
@@ -18,6 +21,37 @@ pub struct ShockTrackingParameters {
 }
 pub struct FlowParameters {
     pub hcr: f64,
+}
+pub struct ShockTrackingSolver<'a> {
+    pub solutions: Array<f64, Ix3>,
+    pub disc: Disc1dAdvectionSpaceTime<'a>,
+    pub mesh: &'a Mesh2d,
+    pub solver_params: &'a SolverParameters,
+}
+impl<'a> ShockTrackingSolver<'a> {
+    pub fn new(
+        basis: LagrangeBasis1DLobatto,
+        enriched_basis: LagrangeBasis1DLobatto,
+        mesh: &'a Mesh2d,
+        solver_params: &'a SolverParameters,
+    ) -> Self {
+        let solutions = Array::zeros((
+            mesh.elem_num,
+            solver_params.cell_gp_num * solver_params.cell_gp_num,
+            solver_params.equation_num,
+        ));
+        let disc = Disc1dAdvectionSpaceTime::new(basis, enriched_basis, mesh, solver_params);
+        Self {
+            solutions,
+            disc,
+            mesh,
+            solver_params,
+        }
+    }
+    pub fn solve(&mut self) {
+        self.disc.initialize_solution(self.solutions.view_mut());
+        self.disc.solve(self.solutions.view_mut());
+    }
 }
 pub struct Solver<'a> {
     pub solutions: Array<f64, Ix3>,
