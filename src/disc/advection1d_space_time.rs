@@ -50,6 +50,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         // Array3::zeros((nelem, cell_ngp * cell_ngp, cell_ngp * cell_ngp));
         // print solutions
         // println!("solutions: {:?}", solutions);
+        // println!("basis_derivatives: {:?}", self.basis.dphis_cell_gps);
         self.compute_residuals(solutions.view(), residuals.view_mut());
         // print residuals
         println!("residuals: {:?}", residuals);
@@ -101,7 +102,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         for ielem in 0..nelem {
             let mut residuals_slice: ArrayViewMut2<f64> = residuals.slice_mut(s![ielem, .., ..]);
             residuals_slice.scaled_add(1.0, &self.volume_integral(solutions, ielem));
-            // println!("residuals_slice: {:?}", residuals_slice);
+            println!("volume_residuals_slice: {:?}", residuals_slice);
         }
         for &iedge in self.mesh.internal_edges.iter() {
             let edge = &self.mesh.edges[iedge];
@@ -160,29 +161,39 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             for igp in 0..cell_ngp {
                 let f: Array1<f64> =
                     space_time_flux1d(sol[[ielem, igp + kgp * cell_ngp, 0]], self.advection_speed);
+                /*
                 if kgp == 1 && igp == 1 {
                     println!("f: {:?}", f);
                 }
+                */
+            
+                
                 let transformed_f: Array1<f64> = elem.jacob_det[[kgp, igp]]
                     * f.dot(&elem.jacob_inv_t.slice(s![kgp, igp, .., ..]));
-                if kgp == 1 && igp == 1 {
-                    println!(
-                        "elem.jacob_det[[kgp, igp]]: {:?}",
-                        elem.jacob_det[[kgp, igp]]
-                    );
-                    println!(
-                        "elem.jacob_inv_t.slice(s![kgp, igp, .., ..]): {:?}",
-                        elem.jacob_inv_t.slice(s![kgp, igp, .., ..])
-                    );
-                    println!("transformed_f: {:?}", transformed_f);
-                }
-                for itest_func in 0..cell_ngp {
+                // println!("transformed_f: {:?}", transformed_f);
+                for itest_func in 0..cell_ngp * cell_ngp {
                     let itest_func_x = itest_func % cell_ngp; // spatial index
                     let itest_func_t = itest_func / cell_ngp; // temporal index
+                    /* 
+                    println!("itest_func: {:?}", itest_func);
+                    println!("itest_func_x: {:?}", itest_func_x);
+                    println!("itest_func_t: {:?}", itest_func_t);
+                    */
                     let test_func_xi = self.basis.phis_cell_gps[[igp, itest_func_x]];
                     let test_func_eta = self.basis.phis_cell_gps[[kgp, itest_func_t]];
                     let dtest_func_dxi = self.basis.dphis_cell_gps[[igp, itest_func_x]];
                     let dtest_func_deta = self.basis.dphis_cell_gps[[kgp, itest_func_t]];
+                    
+                    /*
+                    println!(
+                        "dtest_func_dxi * test_func_eta: {:?}",
+                        dtest_func_dxi * test_func_eta
+                    );
+                    println!(
+                        "dtest_func_deta * test_func_xi: {:?}",
+                        dtest_func_deta * test_func_xi
+                    );
+                    */
                     res[[itest_func, 0]] -= weights[igp]
                         * weights[kgp]
                         * (transformed_f[0] * dtest_func_dxi * test_func_eta
@@ -210,7 +221,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 );
                 let transformed_f: Array1<f64> = elem.enriched_jacob_det[[kgp, igp]]
                     * f.dot(&elem.enriched_jacob_inv_t.slice(s![kgp, igp, .., ..]));
-                for itest_func in 0..enriched_ngp {
+                for itest_func in 0..enriched_ngp * enriched_ngp {
                     let itest_func_x = itest_func % enriched_ngp; // spatial index
                     let itest_func_t = itest_func / enriched_ngp; // temporal index
                     let test_func_xi = self.enriched_basis.phis_cell_gps[[igp, itest_func_x]];
@@ -239,21 +250,20 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         let normal = edge.normal;
         let mut left_res = Array2::zeros((cell_ngp * cell_ngp, 1));
         let mut right_res = Array2::zeros((cell_ngp * cell_ngp, 1));
-        for itest_func in 0..cell_ngp {
+        for itest_func in 0..cell_ngp * cell_ngp {
+            let itest_func_x = itest_func % cell_ngp; // spatial index
+            let itest_func_t = itest_func / cell_ngp; // temporal index
             for kgp in 0..cell_ngp {
                 // Map quadrature points based on edge orientation
                 let left_kgp = kgp;
                 let right_kgp = kgp;
                 let left_value: ArrayView1<f64> = left_sol.slice(s![kgp, ..]);
                 let right_value: ArrayView1<f64> = right_sol.slice(s![kgp, ..]);
-                println!("left_value: {:?}", left_value);
-                println!("right_value: {:?}", right_value);
                 let num_flux =
                     smoothed_upwind(left_value[0], right_value[0], normal, self.advection_speed);
-                println!("num_flux: {:?}", num_flux);
                 let left_jacob_det = left_elem.jacob_det[[kgp, cell_ngp - 1]];
                 let left_jacob_inv_t: ArrayView2<f64> =
-                    left_elem.jacob_inv_t.slice(s![kgp, 0, .., ..]);
+                    left_elem.jacob_inv_t.slice(s![kgp, cell_ngp - 1, .., ..]);
                 let left_n_ref = [1.0, 0.0];
                 let left_n_ref_array = Array1::from_vec(left_n_ref.to_vec());
                 let left_transformed_normal: Array1<f64> = left_jacob_inv_t.dot(&left_n_ref_array);
@@ -275,18 +285,18 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 .sqrt();
                 let right_scaling = right_jacob_det * right_normal_magnitude;
                 let right_transformed_flux = right_scaling * (-num_flux);
-                let left_phi = self.basis.phis_cell_gps[[cell_ngp - 1, itest_func]]
-                    * self.basis.phis_cell_gps[[left_kgp, itest_func]];
-                let right_phi = self.basis.phis_cell_gps[[0, itest_func]]
-                    * self.basis.phis_cell_gps[[right_kgp, itest_func]];
-                println!("left_transformed_flux: {:?}", left_transformed_flux);
-                println!("right_transformed_flux: {:?}", right_transformed_flux);
+                let left_phi = self.basis.phis_cell_gps[[cell_ngp - 1, itest_func_x]]
+                    * self.basis.phis_cell_gps[[left_kgp, itest_func_t]];
+                let right_phi = self.basis.phis_cell_gps[[0, itest_func_x]]
+                    * self.basis.phis_cell_gps[[right_kgp, itest_func_t]];
+                // println!("left_transformed_flux: {:?}", left_transformed_flux);
+                // println!("right_transformed_flux: {:?}", right_transformed_flux);
                 left_res[[itest_func, 0]] += weights[left_kgp] * left_transformed_flux * left_phi;
                 right_res[[itest_func, 0]] +=
                     weights[right_kgp] * right_transformed_flux * right_phi;
             }
         }
-        (left_res, right_res)
+        (left_res, right_res) 
     }
     fn enriched_surface_integral(
         &self,
@@ -1011,9 +1021,6 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                         let u = { if iedge == 0 { 2.0 } else { 0.0 } };
                         let phi = self.basis.phis_cell_gps[[kgp, itest_func_x]]
                             * self.basis.phis_cell_gps[[0, itest_func_t]];
-                        if itest_func_x == 0 && itest_func_t == 0 {
-                            //println!("phi: {:?}", phi);
-                        }
                         let jacob_det = elem.jacob_det[[0, kgp]];
                         let jacob_inv_t: ArrayView2<f64> =
                             elem.jacob_inv_t.slice(s![0, kgp, .., ..]);
@@ -1026,8 +1033,12 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                         let flux = -u;
                         let transformed_flux = scaling * flux;
                         //print iedge and kgp
-
-                        // println!("transformed_flux: {:?}", transformed_flux);
+                        if kgp == 1 {
+                            println!("transformed_normal: {:?}", transformed_normal);
+                            println!("scaling: {:?}", scaling);
+                            println!("transformed_flux: {:?}", transformed_flux);
+                            println!("weights[kgp] * phi * transformed_flux: {:?}", weights[kgp] * phi * transformed_flux);
+                        }
                         res[[ielem, itest_func, 0]] += weights[kgp] * phi * transformed_flux;
                     }
                 }
@@ -1053,7 +1064,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                         let scaling = jacob_det * normal_magnitude;
                         let flux = u;
                         let transformed_flux = scaling * flux;
-                        res[[ielem, itest_func, 0]] += weights[kgp] * phi * transformed_flux;
+                        res[[ielem, itest_func, 0]] += weights[cell_ngp - 1 - kgp] * phi * transformed_flux;
                     }
                 }
             }
@@ -1099,7 +1110,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                         let normal_magnitude =
                             (transformed_normal[0].powi(2) + transformed_normal[1].powi(2)).sqrt();
                         let scaling = jacob_det * normal_magnitude;
-                        let flux = -u;
+                        let flux = - self.advection_speed * u;
                         let transformed_flux = scaling * flux;
                         res[[ielem, itest_func, 0]] += weights[kgp] * phi * transformed_flux;
                     }

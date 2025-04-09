@@ -129,22 +129,21 @@ impl LagrangeBasis1DLobatto {
             // loop over basis functions
             for i in 0..dofs {
                 // loop over gauss points
-                let mut derivative = 0.0;
-                for k in 0..dofs {
-                    // loop over gauss points
-                    if k != j {
+                let mut sum = 0.0;
+                for l in 0..dofs {
+                    if l != j {
                         let mut product = 1.0;
                         for m in 0..dofs {
-                            // loop over gauss points
-                            if m != j && m != k {
+                            if m != j && m != l {
                                 product *= (cell_gauss_points[i] - cell_gauss_points[m])
                                     / (cell_gauss_points[j] - cell_gauss_points[m]);
                             }
                         }
-                        derivative += product / (cell_gauss_points[j] - cell_gauss_points[k]);
+                        sum += product / (cell_gauss_points[j] - cell_gauss_points[l]);
                     }
                 }
-                dphis_cell_gps[(i, j)] = derivative;
+
+                dphis_cell_gps[(i, j)] = sum;
             }
         }
         LagrangeBasis1DLobatto {
