@@ -101,13 +101,13 @@ volume_integrand_simplified = sp.simplify(volume_integrand)
 # Output the LaTeX-formatted result
 #print(latex_output)
 
-volume_integrand_x = volume_integrand.diff(x2)
+volume_integrand_x = volume_integrand.diff(x1)
 volume_integrand_x_simplified = sp.simplify(volume_integrand_x)
-print("volume_integrand_x:")
+print("volume_integrand_dx1:")
 sp.pprint(volume_integrand_x_simplified)
-volume_integrand_y = volume_integrand.diff(y2)
+volume_integrand_y = volume_integrand.diff(y1)
 volume_integrand_y_simplified = sp.simplify(volume_integrand_y)
-print("volume_integrand_y:")
+print("volume_integrand_dy1:")
 sp.pprint(volume_integrand_y_simplified)
 '''
 l = sp.IndexedBase('l')
@@ -116,7 +116,7 @@ enriched_u = sp.Sum(l[i] * u[i], (i, 1, n))
 '''
 volume_integrand_u = volume_integrand.diff(u)
 volume_integrand_u_simplified = sp.simplify(volume_integrand_u)
-print("volume_integrand_u:")
+print("volume_integrand_du:")
 sp.pprint(volume_integrand_u_simplified)
 
 # Define the integral

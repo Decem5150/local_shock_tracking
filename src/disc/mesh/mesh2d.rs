@@ -1,7 +1,7 @@
 use super::mesh1d::Node;
 use crate::disc::advection1d_space_time::boundary_condition::{BoundaryQuantity1d, BoundaryType};
 use crate::disc::basis::lagrange1d::{LagrangeBasis1D, LagrangeBasis1DLobatto};
-use ndarray::{Array, Array1, ArrayView1, Ix1, Ix2, Ix3, Ix4};
+use ndarray::{Array, Array1, Array2, Array4, ArrayView1, Ix1, Ix2, Ix3, Ix4};
 
 pub struct BoundaryPatch2d {
     pub iedges: Array<usize, Ix1>,
@@ -181,6 +181,56 @@ impl Mesh2d {
             let normal = [y[1] - y[0], x[0] - x[1]];
             edge.normal = normal;
         }
+    }
+    pub fn evaluate_jacob(
+        &self,
+        basis: &LagrangeBasis1DLobatto,
+        x: &[f64],
+        y: &[f64],
+    ) -> (Array2<f64>, Array4<f64>) {
+        let ngp = basis.cell_gauss_points.len();
+        let mut jacob_det = Array::zeros((ngp, ngp));
+        let mut jacob_inv_t = Array::zeros((ngp, ngp, 2, 2));
+        for i in 0..ngp {
+            let eta = basis.cell_gauss_points[i];
+            for j in 0..ngp {
+                let xi = basis.cell_gauss_points[j];
+                let dn_dxi = [
+                    -0.25 * (1.0 - eta), // dN1/dξ
+                    0.25 * (1.0 - eta),  // dN2/dξ
+                    0.25 * (1.0 + eta),  // dN3/dξ
+                    -0.25 * (1.0 + eta), // dN4/dξ
+                ];
+                let dn_deta = [
+                    -0.25 * (1.0 - xi), // dN1/dη
+                    -0.25 * (1.0 + xi), // dN2/dη
+                    0.25 * (1.0 + xi),  // dN3/dη
+                    0.25 * (1.0 - xi),  // dN4/dη
+                ];
+                let mut dx_dxi = 0.0;
+                let mut dx_deta = 0.0;
+                let mut dy_dxi = 0.0;
+                let mut dy_deta = 0.0;
+
+                for k in 0..4 {
+                    dx_dxi += dn_dxi[k] * x[k];
+                    dx_deta += dn_deta[k] * x[k];
+                    dy_dxi += dn_dxi[k] * y[k];
+                    dy_deta += dn_deta[k] * y[k];
+                }
+                // Calculate determinant at this point
+                let det_j = dx_dxi * dy_deta - dx_deta * dy_dxi;
+                jacob_det[[i, j]] = det_j;
+                let inv_det = 1.0 / det_j;
+
+                // Compute inverse transpose Jacobian with 4D indexing
+                jacob_inv_t[[i, j, 0, 0]] = dy_deta * inv_det;
+                jacob_inv_t[[i, j, 0, 1]] = -dy_dxi * inv_det;
+                jacob_inv_t[[i, j, 1, 0]] = -dx_deta * inv_det;
+                jacob_inv_t[[i, j, 1, 1]] = dx_dxi * inv_det;
+            }
+        }
+        (jacob_det, jacob_inv_t)
     }
     fn compute_jacob(
         &mut self,

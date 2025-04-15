@@ -1,3 +1,4 @@
+#![feature(autodiff)]
 mod disc;
 mod initialization;
 mod io;
