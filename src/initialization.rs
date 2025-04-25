@@ -6,7 +6,7 @@ use crate::{
         mesh::{mesh1d::Mesh1d, mesh2d::Mesh2d},
     },
     io::params_parser::SolverParamParser,
-    solver::{FlowParameters, ShockTrackingSolver, Solver, SolverParameters},
+    solver::{FlowParameters, ShockTrackingSolver, SolverParameters},
 };
 
 pub fn initialize_params() -> (FlowParameters, SolverParameters) {

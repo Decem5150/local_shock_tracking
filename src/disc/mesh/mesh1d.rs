@@ -1,30 +1,30 @@
-use crate::disc::burgers1d::boundary_condition::{BoundaryQuantity1d, BoundaryType};
+// use crate::disc::burgers1d::boundary_condition::{BoundaryQuantity1d, BoundaryType};
 
 use ndarray::{Array, ArrayView1, Ix1};
 
-pub struct BoundaryPatch1d {
-    pub inode: usize,
-    pub boundary_type: BoundaryType,
-    pub boundary_quantity: Option<BoundaryQuantity1d>,
-}
+// pub struct BoundaryPatch1d {
+//     pub inode: usize,
+//     pub boundary_type: BoundaryType,
+//     pub boundary_quantity: Option<BoundaryQuantity1d>,
+// }
+
 pub struct Node {
     pub x: f64,
     pub y: f64,
-    pub parent_elements: Array<isize, Ix1>,
-    pub local_ids: Array<isize, Ix1>,
+    pub parents: Vec<usize>,
+    pub local_ids: Vec<usize>,
 }
+
 pub struct Element1d {
-    pub inodes: Array<usize, Ix1>,
-    pub ineighbors: Array<isize, Ix1>,
+    pub inodes: Vec<usize>,
+    pub ineighbors: Vec<usize>,
     pub jacob_det: f64,
 }
 pub struct Mesh1d {
-    pub nodes: Array<Node, Ix1>,
-    pub elements: Array<Element1d, Ix1>,
-    pub internal_nodes: Array<usize, Ix1>,
-    pub internal_elements: Array<usize, Ix1>, // index of internal elements
-    pub boundary_elements: Array<usize, Ix1>, // index of boundary elements
-    pub boundary_patches: Array<BoundaryPatch1d, Ix1>,
+    pub nodes: Vec<Node>,
+    pub elements: Vec<Element1d>,
+    pub internal_nodes: Vec<usize>,
+    pub boundary_nodes: Vec<usize>,
     pub elem_num: usize,
     pub node_num: usize,
 }
@@ -35,78 +35,57 @@ impl Mesh1d {
         nodes.push(Node {
             x: left_coord,
             y: 0.0,
-            parent_elements: Array::from_vec(vec![-1, 0]),
-            local_ids: Array::from_vec(vec![-1, 0]),
+            parents: vec![0],
+            local_ids: vec![0],
         });
-        for i in 1..node_num as isize - 1 {
+        for i in 1..node_num - 1 {
             nodes.push(Node {
                 x: left_coord + i as f64 * dx,
                 y: 0.0,
-                parent_elements: Array::from_vec(vec![i - 1, i]),
-                local_ids: Array::from_vec(vec![1, 0]),
+                parents: vec![i - 1, i],
+                local_ids: vec![1, 0],
             });
         }
         nodes.push(Node {
             x: right_coord,
             y: 0.0,
-            parent_elements: Array::from_vec(vec![node_num as isize - 2, -1]),
-            local_ids: Array::from_vec(vec![1, -1]),
+            parents: vec![node_num - 2],
+            local_ids: vec![1],
         });
-        let nodes = Array::from_vec(nodes);
         let elem_num = node_num - 1;
         let mut elements = Vec::new();
         elements.push(Element1d {
-            inodes: Array::from_vec(vec![0, 1]),
-            ineighbors: Array::from_vec(vec![-1, 1]),
+            inodes: vec![0, 1],
+            ineighbors: vec![1],
             jacob_det: 0.0,
         });
         for i in 1..elem_num - 1 {
             elements.push(Element1d {
-                inodes: Array::from_vec(vec![i, i + 1]),
-                ineighbors: Array::from_vec(vec![i as isize - 1, i as isize + 1]),
+                inodes: vec![i, i + 1],
+                ineighbors: vec![i - 1, i + 1],
                 jacob_det: 0.0,
             });
         }
         elements.push(Element1d {
-            inodes: Array::from_vec(vec![elem_num - 1, elem_num]),
-            ineighbors: Array::from_vec(vec![elem_num as isize - 2, -1]),
+            inodes: vec![elem_num - 1, elem_num],
+            ineighbors: vec![elem_num - 2],
             jacob_det: 0.0,
         });
-        let elements = Array::from_vec(elements);
-        let internal_nodes = Array::from_iter(1..node_num - 1);
-        let internal_elements = Array::from_iter(0..elem_num - 1);
-        let boundary_elements = Array::from_vec(vec![0, elem_num - 1]);
-        let mut boundary_patches = vec![
-            BoundaryPatch1d {
-                inode: 0,
-                boundary_type: BoundaryType::Dirichlet,
-                boundary_quantity: Some(BoundaryQuantity1d { u: 0.0 }),
-            },
-            BoundaryPatch1d {
-                inode: elem_num,
-                boundary_type: BoundaryType::Dirichlet,
-                boundary_quantity: Some(BoundaryQuantity1d { u: 1.0 }),
-            },
-        ];
-        boundary_patches.push(BoundaryPatch1d {
-            inode: elem_num,
-            boundary_type: BoundaryType::Dirichlet,
-            boundary_quantity: None,
-        });
-        let boundary_patches = Array::from_vec(boundary_patches);
+        let internal_nodes = (1..node_num - 1).collect();
+
+        let boundary_nodes = vec![0, elem_num];
         let mut mesh1d = Self {
             nodes,
             elements,
             internal_nodes,
-            internal_elements,
-            boundary_elements,
-            boundary_patches,
+            boundary_nodes,
             elem_num,
             node_num,
         };
-        mesh1d.compute_jacob_det();
+
         mesh1d
     }
+    /*
     pub fn compute_jacob_det(&mut self) {
         for elem in self.elements.iter_mut() {
             let inodes: ArrayView1<usize> = elem.inodes.view();
@@ -115,6 +94,7 @@ impl Mesh1d {
             elem.jacob_det = x1 - x0;
         }
     }
+    */
     /*
     pub fn compute_dphi(&mut self, basis: &LagrangeBasis1D, cell_ngp: usize) {
         let nbasis = cell_ngp;

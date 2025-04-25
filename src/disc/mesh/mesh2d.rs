@@ -4,24 +4,25 @@ use crate::disc::basis::lagrange1d::{LagrangeBasis1D, LagrangeBasis1DLobatto};
 use ndarray::{Array, Array1, Array2, Array4, ArrayView1, Ix1, Ix2, Ix3, Ix4};
 
 pub struct BoundaryPatch2d {
-    pub iedges: Array<usize, Ix1>,
+    pub iedges: Vec<usize>,
     pub boundary_type: BoundaryType,
     pub boundary_quantity: Option<BoundaryQuantity1d>,
 }
 pub struct Edge {
-    pub inodes: Array<usize, Ix1>,
-    pub parent_elements: Array<usize, Ix1>,
-    pub local_ids: Array<usize, Ix1>,
-    pub normal: [f64; 2],
+    pub inodes: Vec<usize>,
+    pub parents: Vec<usize>,
+    pub local_ids: Vec<usize>,
 }
 pub struct Element2d {
-    pub inodes: Array<usize, Ix1>,
-    pub iedges: Array<usize, Ix1>,
-    pub ineighbors: Array<isize, Ix1>,
+    pub inodes: Vec<usize>,
+    pub iedges: Vec<usize>,
+    pub ineighbors: Vec<usize>,
+    /*
     pub jacob_det: Array<f64, Ix2>,
     pub jacob_inv_t: Array<f64, Ix4>,
     pub enriched_jacob_det: Array<f64, Ix2>,
     pub enriched_jacob_inv_t: Array<f64, Ix4>,
+    */
 }
 pub struct SubMesh2d {
     pub nodes: Array<Node, Ix1>,
@@ -29,10 +30,11 @@ pub struct SubMesh2d {
     pub elements: Array<Element2d, Ix1>,
 }
 pub struct Mesh2d {
-    pub nodes: Array<Node, Ix1>,
-    pub edges: Array<Edge, Ix1>,
-    pub elements: Array<Element2d, Ix1>,
-    pub internal_edges: Array<usize, Ix1>,
+    pub nodes: Vec<Node>,
+    pub edges: Vec<Edge>,
+    pub elements: Vec<Element2d>,
+    pub internal_edges: Vec<usize>,
+    pub boundary_edges: Vec<usize>,
     // pub internal_elements: Array<usize, Ix1>, // index of internal elements
     // pub boundary_elements: Array<usize, Ix1>, // index of boundary elements
     // pub boundary_patches: Array<BoundaryPatch2d, Ix1>,
@@ -50,129 +52,103 @@ impl Mesh2d {
             Node {
                 x: 0.0,
                 y: 0.0,
-                parent_elements: Array1::zeros(2),
-                local_ids: Array1::zeros(2),
+                parents: vec![0],
+                local_ids: vec![0],
             },
             Node {
                 x: 1.0,
                 y: 0.0,
-                parent_elements: Array1::zeros(2),
-                local_ids: Array1::zeros(2),
+                parents: vec![0, 1],
+                local_ids: vec![1, 0],
             },
             Node {
                 x: 2.0,
                 y: 0.0,
-                parent_elements: Array1::zeros(2),
-                local_ids: Array1::zeros(2),
+                parents: vec![1],
+                local_ids: vec![1],
             },
             Node {
                 x: 2.0,
                 y: 1.0,
-                parent_elements: Array1::zeros(2),
-                local_ids: Array1::zeros(2),
+                parents: vec![1],
+                local_ids: vec![2],
             },
             Node {
                 x: 1.1,
                 y: 1.0,
-                parent_elements: Array1::zeros(2),
-                local_ids: Array1::zeros(2),
+                parents: vec![0, 1],
+                local_ids: vec![2, 3],
             },
             Node {
                 x: 0.0,
                 y: 1.0,
-                parent_elements: Array1::zeros(2),
-                local_ids: Array1::zeros(2),
+                parents: vec![0],
+                local_ids: vec![3],
             },
         ];
-        let nodes = Array::from_vec(nodes);
         let edges = vec![
             Edge {
-                inodes: Array1::from_vec(vec![0, 1]),
-                parent_elements: Array1::from_vec(vec![0]),
-                local_ids: Array1::zeros(1),
-                normal: [0.0, 0.0],
+                inodes: vec![0, 1],
+                parents: vec![0],
+                local_ids: vec![0],
             },
             Edge {
-                inodes: Array1::from_vec(vec![1, 2]),
-                parent_elements: Array1::from_vec(vec![1]),
-                local_ids: Array1::zeros(1),
-                normal: [0.0, 0.0],
+                inodes: vec![1, 2],
+                parents: vec![1],
+                local_ids: vec![0],
             },
             Edge {
-                inodes: Array1::from_vec(vec![2, 3]),
-                parent_elements: Array1::from_vec(vec![1]),
-                local_ids: Array1::zeros(1),
-                normal: [0.0, 0.0],
+                inodes: vec![2, 3],
+                parents: vec![1],
+                local_ids: vec![1],
             },
             Edge {
-                inodes: Array1::from_vec(vec![3, 4]),
-                parent_elements: Array1::from_vec(vec![1]),
-                local_ids: Array1::zeros(1),
-                normal: [0.0, 0.0],
+                inodes: vec![3, 4],
+                parents: vec![1],
+                local_ids: vec![2],
             },
             Edge {
-                inodes: Array1::from_vec(vec![4, 5]),
-                parent_elements: Array1::from_vec(vec![0]),
-                local_ids: Array1::zeros(1),
-                normal: [0.0, 0.0],
+                inodes: vec![4, 5],
+                parents: vec![0],
+                local_ids: vec![2],
             },
             Edge {
-                inodes: Array1::from_vec(vec![5, 0]),
-                parent_elements: Array1::from_vec(vec![0]),
-                local_ids: Array1::zeros(1),
-                normal: [0.0, 0.0],
+                inodes: vec![5, 0],
+                parents: vec![0],
+                local_ids: vec![3],
             },
             Edge {
-                inodes: Array1::from_vec(vec![1, 4]),
-                parent_elements: Array1::from_vec(vec![0, 1]),
-                local_ids: Array1::from_vec(vec![1, 3]),
-                normal: [0.0, 0.0],
+                inodes: vec![1, 4],
+                parents: vec![0, 1],
+                local_ids: vec![1, 3],
             },
         ];
-        let edges = Array::from_vec(edges);
-        let internal_edges = Array::from_vec(vec![6]);
-        let elements = Array::from_vec(vec![
+        let internal_edges = vec![6];
+        let boundary_edges = vec![0, 1, 2, 3, 4, 5];
+        let elements = vec![
             Element2d {
-                inodes: Array1::from_vec(vec![0, 1, 4, 5]),
-                iedges: Array1::from_vec(vec![0, 6, 4, 5]),
-                ineighbors: Array1::zeros(4),
-                jacob_det: Array::zeros((cell_gp_num, cell_gp_num)),
-                jacob_inv_t: Array::zeros((cell_gp_num, cell_gp_num, 2, 2)),
-                enriched_jacob_det: Array::zeros((enriched_cell_gp_num, enriched_cell_gp_num)),
-                enriched_jacob_inv_t: Array::zeros((
-                    enriched_cell_gp_num,
-                    enriched_cell_gp_num,
-                    2,
-                    2,
-                )),
+                inodes: vec![0, 1, 4, 5],
+                iedges: vec![0, 6, 4, 5],
+                ineighbors: vec![1],
             },
             Element2d {
-                inodes: Array1::from_vec(vec![1, 2, 3, 4]),
-                iedges: Array1::from_vec(vec![1, 2, 3, 6]),
-                ineighbors: Array1::zeros(4),
-                jacob_det: Array::zeros((cell_gp_num, cell_gp_num)),
-                jacob_inv_t: Array::zeros((cell_gp_num, cell_gp_num, 2, 2)),
-                enriched_jacob_det: Array::zeros((enriched_cell_gp_num, enriched_cell_gp_num)),
-                enriched_jacob_inv_t: Array::zeros((
-                    enriched_cell_gp_num,
-                    enriched_cell_gp_num,
-                    2,
-                    2,
-                )),
+                inodes: vec![1, 2, 3, 4],
+                iedges: vec![1, 2, 3, 6],
+                ineighbors: vec![0],
             },
-        ]);
+        ];
         let mut mesh = Mesh2d {
             nodes,
             edges,
             elements,
             internal_edges,
+            boundary_edges,
             elem_num: 2,
             node_num: 6,
         };
-        mesh.compute_normal();
-        mesh.compute_jacob(&basis, &enriched_basis);
         mesh
     }
+    /*
     fn compute_normal(&mut self) {
         for edge in self.edges.iter_mut() {
             let inodes: ArrayView1<usize> = edge.inodes.view();
@@ -220,14 +196,14 @@ impl Mesh2d {
                 }
                 // Calculate determinant at this point
                 let det_j = dx_dxi * dy_deta - dx_deta * dy_dxi;
-                jacob_det[[i, j]] = det_j;
+                jacob_det[[j, i]] = det_j;
                 let inv_det = 1.0 / det_j;
 
                 // Compute inverse transpose Jacobian with 4D indexing
-                jacob_inv_t[[i, j, 0, 0]] = dy_deta * inv_det;
-                jacob_inv_t[[i, j, 0, 1]] = -dy_dxi * inv_det;
-                jacob_inv_t[[i, j, 1, 0]] = -dx_deta * inv_det;
-                jacob_inv_t[[i, j, 1, 1]] = dx_dxi * inv_det;
+                jacob_inv_t[[j, i, 0, 0]] = dy_deta * inv_det;
+                jacob_inv_t[[j, i, 0, 1]] = -dy_dxi * inv_det;
+                jacob_inv_t[[j, i, 1, 0]] = -dx_deta * inv_det;
+                jacob_inv_t[[j, i, 1, 1]] = dx_dxi * inv_det;
             }
         }
         (jacob_det, jacob_inv_t)
@@ -380,4 +356,5 @@ impl Mesh2d {
             }
         }
     }
+    */
 }

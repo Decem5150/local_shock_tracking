@@ -13,8 +13,8 @@ pub struct LagrangeBasis1D {
 }
 
 pub struct LagrangeBasis1DLobatto {
-    pub cell_gauss_points: Array<f64, Ix1>,
-    pub cell_gauss_weights: Array<f64, Ix1>,
+    pub cell_gauss_points: Vec<f64>,
+    pub cell_gauss_weights: Vec<f64>,
     pub phis_cell_gps: Array<f64, Ix2>,  // (ngp, nbasis)
     pub dphis_cell_gps: Array<f64, Ix2>, // (ngp, nbasis)
 }
@@ -119,9 +119,9 @@ impl LagrangeBasis1DLobatto {
         let mut phis_cell_gps = Array::zeros((dofs, dofs));
         let mut dphis_cell_gps = Array::zeros((dofs, dofs));
         // Compute the basis functions at the gauss points
-        for i in 0..dofs {
-            for j in 0..dofs {
-                phis_cell_gps[(i, j)] = if i == j { 1.0 } else { 0.0 };
+        for j in 0..dofs {
+            for i in 0..dofs {
+                phis_cell_gps[(j, i)] = if i == j { 1.0 } else { 0.0 };
             }
         }
         // Compute the derivatives of the basis functions at the gauss points
@@ -143,7 +143,7 @@ impl LagrangeBasis1DLobatto {
                     }
                 }
 
-                dphis_cell_gps[(i, j)] = sum;
+                dphis_cell_gps[(j, i)] = sum;
             }
         }
         LagrangeBasis1DLobatto {

@@ -10,6 +10,6 @@ lto = "fat"
 csv = "1.3.1"
 faer = "0.21.9"
 ndarray = "0.16.1"
-ndarray-linalg = { version = "0.17.0", features = ["openblas"] }
+
 serde = { version = "1.0.218", features = ["derive"] }
 serde_json = "1.0.139"

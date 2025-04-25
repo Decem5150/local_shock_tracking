@@ -1,5 +1,5 @@
 use ndarray::Array1;
 
-pub fn space_time_flux1d(u: f64, advection_speed: f64) -> Array1<f64> {
-    Array1::from_vec(vec![advection_speed * u, u])
+pub fn space_time_flux1d(u: f64, advection_speed: f64) -> [f64; 2] {
+    [advection_speed * u, u]
 }
