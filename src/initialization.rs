@@ -53,7 +53,7 @@ pub fn initialize_two_element_mesh2d(
     Mesh2d::create_two_element_mesh(basis, enriched_basis)
 }
 pub fn initialize_solver<'a>(
-    mesh: &'a Mesh2d,
+    mesh: &'a mut Mesh2d,
     basis: LagrangeBasis1DLobatto,
     enriched_basis: LagrangeBasis1DLobatto,
     solver_param: &'a SolverParameters,

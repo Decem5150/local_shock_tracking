@@ -5,7 +5,7 @@ mod shock_tracking;
 use flux::space_time_flux1d;
 use ndarray::{
     Array, Array1, Array2, Array3, Array4, ArrayView1, ArrayView2, ArrayView3, ArrayViewMut2,
-    ArrayViewMut3, Order, s,
+    ArrayViewMut3, Order, array, s,
 };
 use riemann_solver::smoothed_upwind;
 use std::autodiff::autodiff;
@@ -55,7 +55,7 @@ pub struct Disc1dAdvectionSpaceTime<'a> {
     pub current_iter: usize,
     pub basis: LagrangeBasis1DLobatto,
     pub enriched_basis: LagrangeBasis1DLobatto,
-    mesh: &'a Mesh2d,
+    mesh: &'a mut Mesh2d,
     solver_param: &'a SolverParameters,
     advection_speed: f64,
 }
@@ -63,7 +63,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
     pub fn new(
         basis: LagrangeBasis1DLobatto,
         enriched_basis: LagrangeBasis1DLobatto,
-        mesh: &'a Mesh2d,
+        mesh: &'a mut Mesh2d,
         solver_param: &'a SolverParameters,
     ) -> Disc1dAdvectionSpaceTime<'a> {
         Disc1dAdvectionSpaceTime {
@@ -79,10 +79,10 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         let nelem = self.mesh.elem_num;
         let cell_ngp = self.solver_param.cell_gp_num;
         let mut residuals: Array2<f64> = Array2::zeros((nelem, cell_ngp * cell_ngp));
-        let mut dsol: Array3<f64> =
-            Array3::zeros((nelem, cell_ngp * cell_ngp, cell_ngp * cell_ngp));
-        let mut dx: Array3<f64> = Array3::zeros((nelem, cell_ngp * cell_ngp, 4));
-        let mut dy: Array3<f64> = Array3::zeros((nelem, cell_ngp * cell_ngp, 4));
+        let mut dsol: Array2<f64> =
+            Array2::zeros((nelem * cell_ngp * cell_ngp, nelem * cell_ngp * cell_ngp));
+        let mut dx: Array2<f64> = Array2::zeros((nelem * cell_ngp * cell_ngp, 4));
+        let mut dy: Array2<f64> = Array2::zeros((nelem * cell_ngp * cell_ngp, 4));
         // let mut enriched_residuals: Array3<f64> =
         //    Array3::zeros((nelem, (cell_ngp + 1) * (cell_ngp + 1), 1));
 
@@ -101,17 +101,46 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         );
         // print residuals
         println!("residuals: {:?}", residuals);
+        println!("dsol_AD: {:?}", dsol.slice(s![.., 5]));
+        println!("dleftx_AD: {:?}", dx.slice(s![0..cell_ngp * cell_ngp, 2]));
+        println!("drightx_AD: {:?}", dx.slice(s![cell_ngp * cell_ngp.., 3]));
+        //println!("dy: {:?}", dy);
 
-        // self.compute_enriched_residuals(solutions.view(), enriched_residuals.view_mut());
-        // println!("enriched_residuals: {:?}", enriched_residuals);
-        // print enriched residuals
-        // println!("enriched_residuals: {:?}", enriched_residuals);
+        let residual_unperturbed = residuals.clone();
+        residuals.fill(0.0);
+        dsol.fill(0.0);
+        dx.fill(0.0);
+        dy.fill(0.0);
         /*
-        while self.current_iter < self.solver_param.final_step {
-            self.compute_residuals(solutions.view(), residuals.view_mut());
-            self.compute_enriched_residuals(solutions.view(), enriched_residuals.view_mut());
-            self.current_iter += 1;
-        }
+        // perturb solution
+        solutions[(0, 5)] += 1e-4;
+        self.compute_residuals_and_derivatives(
+            solutions.view(),
+            residuals.view_mut(),
+            dsol.view_mut(),
+            dx.view_mut(),
+            dy.view_mut(),
+        );
+
+        let dsol_FD = (&residuals - &residual_unperturbed) / 1e-4;
+        println!("dsol_FD: {:?}", dsol_FD);
+        residuals.fill(0.0);
+        dsol.fill(0.0);
+        dx.fill(0.0);
+        dy.fill(0.0);
+        */
+        /*
+        // perturb x[4]
+        self.mesh.nodes[4].x += 1e-6;
+        self.compute_residuals_and_derivatives(
+            solutions.view(),
+            residuals.view_mut(),
+            dsol.view_mut(),
+            dx.view_mut(),
+            dy.view_mut(),
+        );
+        let dx_FD = (&residuals - residual_unperturbed) / 1e-6;
+        println!("dx_FD: {:?}", dx_FD);
         */
     }
     fn interpolate_to_enriched(&self, sol: ArrayView2<f64>) -> Array2<f64> {
@@ -212,9 +241,9 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         &mut self,
         solutions: ArrayView2<f64>,
         mut residuals: ArrayViewMut2<f64>,
-        mut dsol: ArrayViewMut3<f64>,
-        mut dx: ArrayViewMut3<f64>,
-        mut dy: ArrayViewMut3<f64>,
+        mut dsol: ArrayViewMut2<f64>,
+        mut dx: ArrayViewMut2<f64>,
+        mut dy: ArrayViewMut2<f64>,
     ) {
         let nelem = self.mesh.elem_num;
         let cell_ngp = self.solver_param.cell_gp_num;
@@ -231,26 +260,30 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             for itest_func in 0..cell_ngp * cell_ngp {
                 let itest_func_eta = itest_func / cell_ngp;
                 let itest_func_xi = itest_func % cell_ngp;
-                // let mut res = 0.0;
-                // let mut dres = 1.0;
-
+                let mut dvol_sol: Array1<f64> = Array1::zeros(cell_ngp * cell_ngp);
+                let mut dvol_x: Array1<f64> = Array1::zeros(4);
+                let mut dvol_y: Array1<f64> = Array1::zeros(4);
                 let res = self.dvolume(
                     itest_func_eta,
                     itest_func_xi,
                     solutions.slice(s![ielem, ..]).as_slice().unwrap(),
-                    dsol.slice_mut(s![ielem, itest_func, ..])
-                        .as_slice_mut()
-                        .unwrap(),
+                    dvol_sol.as_slice_mut().unwrap(),
                     x_slice.as_slice(),
-                    dx.slice_mut(s![ielem, itest_func, ..])
-                        .as_slice_mut()
-                        .unwrap(),
+                    dvol_x.as_slice_mut().unwrap(),
                     y_slice.as_slice(),
-                    dy.slice_mut(s![ielem, itest_func, ..])
-                        .as_slice_mut()
-                        .unwrap(),
+                    dvol_y.as_slice_mut().unwrap(),
                     1.0,
                 );
+                residuals[(ielem, itest_func)] += res;
+                dsol.slice_mut(s![
+                    ielem * cell_ngp * cell_ngp + itest_func,
+                    ielem * cell_ngp * cell_ngp..(ielem + 1) * cell_ngp * cell_ngp
+                ])
+                .scaled_add(1.0, &dvol_sol);
+                dx.slice_mut(s![ielem * cell_ngp * cell_ngp + itest_func, ..])
+                    .scaled_add(1.0, &dvol_x);
+                dy.slice_mut(s![ielem * cell_ngp * cell_ngp + itest_func, ..])
+                    .scaled_add(1.0, &dvol_y);
 
                 /*
                 let res = self.volume_integral(
@@ -261,8 +294,8 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                     y_slice.as_slice(),
                 );
                 */
+                /*
                 let mut sol_perturbed = solutions.slice(s![ielem, ..]).to_owned();
-                // add a small increment to sol_perturbed[0]
                 sol_perturbed[0] += 1e-4;
                 let res_perturbed = self.volume_integral(
                     itest_func_eta,
@@ -274,21 +307,29 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 // finite difference
                 let dres_dsol0 = (res_perturbed - res) / 1e-4;
                 println!("dres_dsol0: {:?}", dres_dsol0);
-                residuals[(ielem, itest_func)] += res;
 
-                /*
-                println!(
-                    "dsol[{:?}]: {:?}",
-                    itest_func,
-                    dsol.slice(s![ielem, itest_func, ..])
-                );
                 */
                 /*
-                println!(
-                    "dx[{:?}]: {:?}",
-                    itest_func,
-                    dx.slice(s![ielem, itest_func, ..])
-                );
+                if ielem == 0 {
+                    println!(
+                        "dx_ad[{:?}]: {:?}",
+                        itest_func,
+                        dx[(ielem * cell_ngp * cell_ngp + itest_func, 2)]
+                    );
+                    // perturb x[2]
+                    x_slice[2] += 1e-4;
+                    let res_perturbed = self.volume_integral(
+                        itest_func_eta,
+                        itest_func_xi,
+                        solutions.slice(s![ielem, ..]).as_slice().unwrap(),
+                        x_slice.as_slice(),
+                        y_slice.as_slice(),
+                    );
+                    let dx_fd = (res_perturbed - res) / 1e-4;
+                    println!("dx_fd: {:?}", dx_fd);
+                }
+                */
+                /*
                 println!(
                     "dy[{:?}]: {:?}",
                     itest_func,
@@ -303,7 +344,8 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             */
             // println!("volume_residuals_slice: {:?}", residuals_slice);
         }
-        println!("residuals after volume integral: {:?}", residuals);
+        // println!("residuals after volume integral: {:?}", residuals);
+
         for &iedge in self.mesh.internal_edges.iter() {
             let edge = &self.mesh.edges[iedge];
             let left_ref_normal = [1.0, 0.0];
@@ -356,7 +398,6 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             for itest_func in 0..cell_ngp * cell_ngp {
                 let itest_func_eta = itest_func / cell_ngp;
                 let itest_func_xi = itest_func % cell_ngp;
-
                 for edge_gp in 0..cell_ngp {
                     // Map quadrature points based on edge orientation
                     let left_kgp = edge_gp;
@@ -369,7 +410,10 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                     let right_xi = self.basis.cell_gauss_points[right_igp];
                     let left_value = left_sol_slice[left_igp + left_kgp * cell_ngp];
                     let right_value = right_sol_slice[right_igp + right_kgp * cell_ngp];
-
+                    let mut dflux_dleft_x = [0.0; 4];
+                    let mut dflux_dleft_y = [0.0; 4];
+                    let mut dflux_dright_x = [0.0; 4];
+                    let mut dflux_dright_y = [0.0; 4];
                     let (
                         num_flux,
                         dflux_dul,
@@ -382,13 +426,20 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                         self.advection_speed,
                         left_value,
                         right_value,
-                        grouped_x[4],
-                        grouped_x[5],
-                        grouped_y[4],
-                        grouped_y[5],
+                        left_x[common_edge[0]],
+                        left_x[(common_edge[0] + 1) % 4],
+                        left_y[common_edge[0]],
+                        left_y[(common_edge[0] + 1) % 4],
                         1.0,
                     );
-
+                    dflux_dleft_x[common_edge[0]] = dflux_dx0;
+                    dflux_dleft_x[(common_edge[0] + 1) % 4] = dflux_dx1;
+                    dflux_dleft_y[common_edge[0]] = dflux_dy0;
+                    dflux_dleft_y[(common_edge[0] + 1) % 4] = dflux_dy1;
+                    dflux_dright_x[common_edge[1]] = dflux_dx1;
+                    dflux_dright_x[(common_edge[1] + 1) % 4] = dflux_dx0;
+                    dflux_dright_y[common_edge[1]] = dflux_dy1;
+                    dflux_dright_y[(common_edge[1] + 1) % 4] = dflux_dy0;
                     /*
                     let num_flux = self.compute_numerical_flux(
                         self.advection_speed,
@@ -400,19 +451,19 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                         grouped_y[5],
                     );
                     */
-                    println!("num_flux: {:?}", num_flux);
-                    let mut dleft_x = [0.0; 4];
-                    let mut dleft_y = [0.0; 4];
-                    let mut dright_x = [0.0; 4];
-                    let mut dright_y = [0.0; 4];
+
+                    let mut dleft_scaling_dx = [0.0; 4];
+                    let mut dleft_scaling_dy = [0.0; 4];
+                    let mut dright_scaling_dx = [0.0; 4];
+                    let mut dright_scaling_dy = [0.0; 4];
                     let left_scaling = self.dscaling(
                         left_eta,
                         left_xi,
                         left_ref_normal,
                         left_x.as_slice(),
-                        dleft_x.as_mut_slice(),
+                        dleft_scaling_dx.as_mut_slice(),
                         left_y.as_slice(),
-                        dleft_y.as_mut_slice(),
+                        dleft_scaling_dy.as_mut_slice(),
                         1.0,
                     );
                     let right_scaling = self.dscaling(
@@ -420,60 +471,65 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                         right_xi,
                         right_ref_normal,
                         right_x.as_slice(),
-                        dright_x.as_mut_slice(),
+                        dright_scaling_dx.as_mut_slice(),
                         right_y.as_slice(),
-                        dright_y.as_mut_slice(),
+                        dright_scaling_dy.as_mut_slice(),
                         1.0,
                     );
 
-                    /*
-                    let (left_transformed_flux, right_transformed_flux) = self
-                        .compute_surface_flux(
-                            left_eta,
-                            left_xi,
-                            right_eta,
-                            right_xi,
-                            left_ref_normal,
-                            right_ref_normal,
-                            left_nodes_ids,
-                            right_nodes_ids,
-                            left_value,
-                            right_value,
-                            grouped_x.as_slice(),
-                            grouped_y.as_slice(),
-                        );
-                    */
                     let left_transformed_flux = num_flux * left_scaling;
                     let right_transformed_flux = -num_flux * right_scaling;
+
                     let dleft_transformed_flux_dul = left_scaling * dflux_dul;
                     let dleft_transformed_flux_dur = left_scaling * dflux_dur;
-                    println!(
-                        "dleft_transformed_flux_dul_AD: {:?}",
-                        dleft_transformed_flux_dul
-                    );
-                    println!(
-                        "dleft_transformed_flux_dur_AD: {:?}",
-                        dleft_transformed_flux_dur
-                    );
+
+                    let dleft_transformed_flux_dx = array![
+                        dleft_scaling_dx[0] * num_flux + left_scaling * dflux_dleft_x[0],
+                        dleft_scaling_dx[1] * num_flux + left_scaling * dflux_dleft_x[1],
+                        dleft_scaling_dx[2] * num_flux + left_scaling * dflux_dleft_x[2],
+                        dleft_scaling_dx[3] * num_flux + left_scaling * dflux_dleft_x[3],
+                    ];
+                    let dleft_transformed_flux_dy = array![
+                        dleft_scaling_dy[0] * num_flux + left_scaling * dflux_dleft_y[0],
+                        dleft_scaling_dy[1] * num_flux + left_scaling * dflux_dleft_y[1],
+                        dleft_scaling_dy[2] * num_flux + left_scaling * dflux_dleft_y[2],
+                        dleft_scaling_dy[3] * num_flux + left_scaling * dflux_dleft_y[3],
+                    ];
+                    let dright_transformed_flux_dul = -right_scaling * dflux_dul;
+                    let dright_transformed_flux_dur = -right_scaling * dflux_dur;
+
+                    let dright_transformed_flux_dx = array![
+                        -(dright_scaling_dx[0] * num_flux + right_scaling * dflux_dright_x[0]),
+                        -(dright_scaling_dx[1] * num_flux + right_scaling * dflux_dright_x[1]),
+                        -(dright_scaling_dx[2] * num_flux + right_scaling * dflux_dright_x[2]),
+                        -(dright_scaling_dx[3] * num_flux + right_scaling * dflux_dright_x[3]),
+                    ];
+                    let dright_transformed_flux_dy = array![
+                        -(dright_scaling_dy[0] * num_flux + right_scaling * dflux_dright_y[0]),
+                        -(dright_scaling_dy[1] * num_flux + right_scaling * dflux_dright_y[1]),
+                        -(dright_scaling_dy[2] * num_flux + right_scaling * dflux_dright_y[2]),
+                        -(dright_scaling_dy[3] * num_flux + right_scaling * dflux_dright_y[3]),
+                    ];
+                    /*
                     let mut ul_perturbed = left_value + 1e-4;
                     let mut ur_perturbed = right_value + 1e-4;
                     let ul_perturbed_num_flux = self.compute_numerical_flux(
                         self.advection_speed,
                         ul_perturbed,
                         right_value,
-                        grouped_x[4],
-                        grouped_x[5],
-                        grouped_y[4],
-                        grouped_y[5],
+                        left_x[common_edge[0]],
+                        left_x[(common_edge[0] + 1) % 4],
+                        left_y[common_edge[0]],
+                        left_y[(common_edge[0] + 1) % 4],
                     );
                     let ur_perturbed_num_flux = self.compute_numerical_flux(
                         self.advection_speed,
                         left_value,
                         ur_perturbed,
-                        grouped_x[4],
-                        grouped_x[5],
-                        grouped_y[4],
-                        grouped_y[5],
+                        left_x[common_edge[0]],
+                        left_x[(common_edge[0] + 1) % 4],
+                        left_y[common_edge[0]],
+                        left_y[(common_edge[0] + 1) % 4],
                     );
                     let ul_perturbed_transformed_flux = ul_perturbed_num_flux * left_scaling;
                     let ur_perturbed_transformed_flux = ur_perturbed_num_flux * right_scaling;
@@ -481,6 +537,31 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                         (ul_perturbed_transformed_flux - left_transformed_flux) / 1e-4;
                     let dleft_transformed_flux_dur_FD =
                         (ur_perturbed_transformed_flux - left_transformed_flux) / 1e-4;
+
+                    let mut x1_perturbed = left_x.clone();
+                    x1_perturbed[1] += 1e-5;
+                    let mut y1_perturbed = left_y.clone();
+                    y1_perturbed[1] += 1e-5;
+                    let x1_perturbed_scaling = self.compute_flux_scaling(
+                        left_eta,
+                        left_xi,
+                        left_ref_normal,
+                        x1_perturbed.as_slice(),
+                        left_y.as_slice(),
+                    );
+                    let x1_perturbed_num_flux = self.compute_numerical_flux(
+                        self.advection_speed,
+                        left_value,
+                        right_value,
+                        x1_perturbed[1],
+                        x1_perturbed[2],
+                        left_y[1],
+                        left_y[2],
+                    );
+                    let x1_perturbed_transformed_flux =
+                        x1_perturbed_num_flux * x1_perturbed_scaling;
+                    let dleft_transformed_flux_dx_FD =
+                        (x1_perturbed_transformed_flux - left_transformed_flux) / 1e-5;
 
                     println!(
                         "dleft_transformed_flux_dul_FD: {:?}",
@@ -490,36 +571,48 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                         "dleft_transformed_flux_dur_FD: {:?}",
                         dleft_transformed_flux_dur_FD
                     );
+                    println!(
+                        "dleft_transformed_flux_dx[1]_FD: {:?}",
+                        dleft_transformed_flux_dx_FD
+                    );
+                    */
                     let left_phi = self.basis.phis_cell_gps[[itest_func_xi, left_igp]]
                         * self.basis.phis_cell_gps[[itest_func_eta, left_kgp]];
                     let right_phi = self.basis.phis_cell_gps[[itest_func_xi, right_igp]]
                         * self.basis.phis_cell_gps[[itest_func_eta, right_kgp]];
                     residuals[(ilelem, itest_func)] +=
-                        weights[left_kgp] * left_transformed_flux * left_phi;
+                        weights[edge_gp] * left_transformed_flux * left_phi;
                     residuals[(irelem, itest_func)] +=
-                        weights[left_kgp] * right_transformed_flux * right_phi;
+                        weights[edge_gp] * right_transformed_flux * right_phi;
+                    dsol[(
+                        ilelem * cell_ngp * cell_ngp + itest_func,
+                        ilelem * cell_ngp * cell_ngp + left_kgp * cell_ngp + left_igp,
+                    )] += weights[edge_gp] * dleft_transformed_flux_dul * left_phi;
+                    dsol[(
+                        ilelem * cell_ngp * cell_ngp + itest_func,
+                        irelem * cell_ngp * cell_ngp + right_kgp * cell_ngp + right_igp,
+                    )] += weights[edge_gp] * dleft_transformed_flux_dur * left_phi;
+                    dsol[(
+                        irelem * cell_ngp * cell_ngp + itest_func,
+                        irelem * cell_ngp * cell_ngp + right_kgp * cell_ngp + right_igp,
+                    )] += weights[edge_gp] * dright_transformed_flux_dur * right_phi;
+                    dsol[(
+                        irelem * cell_ngp * cell_ngp + itest_func,
+                        ilelem * cell_ngp * cell_ngp + left_kgp * cell_ngp + left_igp,
+                    )] += weights[edge_gp] * dright_transformed_flux_dul * right_phi;
+                    dx.slice_mut(s![ilelem * cell_ngp * cell_ngp + itest_func, ..])
+                        .scaled_add(weights[edge_gp] * left_phi, &dleft_transformed_flux_dx);
+                    dy.slice_mut(s![ilelem * cell_ngp * cell_ngp + itest_func, ..])
+                        .scaled_add(weights[edge_gp] * left_phi, &dleft_transformed_flux_dy);
+                    dx.slice_mut(s![irelem * cell_ngp * cell_ngp + itest_func, ..])
+                        .scaled_add(weights[edge_gp] * right_phi, &dright_transformed_flux_dx);
+                    dy.slice_mut(s![irelem * cell_ngp * cell_ngp + itest_func, ..])
+                        .scaled_add(weights[edge_gp] * right_phi, &dright_transformed_flux_dy);
                 }
-                /*
-                let mut left_res = 0.0;
-                let mut right_res = 0.0;
-                self.surface_integral(
-                    itest_func_eta,
-                    itest_func_xi,
-                    left_sol_slice,
-                    right_sol_slice,
-                    grouped_x,
-                    grouped_y,
-                    &mut left_res,
-                    &mut right_res,
-                );
-
-                residuals[(ilelem, itest_func)] += left_res;
-                residuals[(irelem, itest_func)] += right_res;
-                */
             }
         }
+        // println!("residuals after surface integral: {:?}", residuals);
 
-        println!("residuals after surface integral: {:?}", residuals);
         for &iedge in self.mesh.boundary_edges.iter() {
             let edge = &self.mesh.edges[iedge];
             let ielem = edge.parents[0];
@@ -539,18 +632,77 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             for itest_func in 0..cell_ngp * cell_ngp {
                 let itest_func_eta = itest_func / cell_ngp;
                 let itest_func_xi = itest_func % cell_ngp;
-                let mut res = 0.0;
-                self.boundary_condition(
-                    iedge,
-                    itest_func_eta,
-                    itest_func_xi,
-                    sol_slice,
-                    x_slice,
-                    y_slice,
-                    &mut res,
-                );
-
-                residuals[(ielem, itest_func)] += res;
+                for edge_gp in 0..cell_ngp {
+                    let (kgp, igp, ref_normal) = match iedge {
+                        0 | 1 => (0, edge_gp, [0.0, -1.0]),
+                        2 => (edge_gp, cell_ngp - 1, [1.0, 0.0]),
+                        3 | 4 => (cell_ngp - 1, edge_gp, [0.0, 1.0]),
+                        5 => (edge_gp, 0, [-1.0, 0.0]),
+                        _ => unreachable!(),
+                    };
+                    let eta = self.basis.cell_gauss_points[kgp];
+                    let xi = self.basis.cell_gauss_points[igp];
+                    let (flux, dflux_du) = match iedge {
+                        0 => {
+                            let u = 2.0;
+                            (-u, 0.0)
+                        }
+                        1 => {
+                            let u = 0.0;
+                            (u, 0.0)
+                        }
+                        2 => {
+                            let u = sol_slice[kgp * cell_ngp + igp];
+                            (self.advection_speed * u, self.advection_speed)
+                        }
+                        3 | 4 => {
+                            let u = sol_slice[igp + kgp * cell_ngp];
+                            (u, 1.0)
+                        }
+                        5 => {
+                            let u = 2.0;
+                            (-self.advection_speed * u, 0.0)
+                        }
+                        _ => unreachable!(),
+                    };
+                    let mut dscaling_dx = [0.0; 4];
+                    let mut dscaling_dy = [0.0; 4];
+                    let scaling = self.dscaling(
+                        eta,
+                        xi,
+                        ref_normal,
+                        x_slice.as_slice(),
+                        dscaling_dx.as_mut_slice(),
+                        y_slice.as_slice(),
+                        dscaling_dy.as_mut_slice(),
+                        1.0,
+                    );
+                    let transformed_flux = scaling * flux;
+                    let dtransformed_flux_du = scaling * dflux_du;
+                    let dtransformed_flux_dx = array![
+                        dscaling_dx[0] * flux,
+                        dscaling_dx[1] * flux,
+                        dscaling_dx[2] * flux,
+                        dscaling_dx[3] * flux,
+                    ];
+                    let dtransformed_flux_dy = array![
+                        dscaling_dy[0] * flux,
+                        dscaling_dy[1] * flux,
+                        dscaling_dy[2] * flux,
+                        dscaling_dy[3] * flux,
+                    ];
+                    let phi = self.basis.phis_cell_gps[(itest_func_eta, kgp)]
+                        * self.basis.phis_cell_gps[(itest_func_xi, igp)];
+                    residuals[(ielem, itest_func)] += weights[edge_gp] * phi * transformed_flux;
+                    dsol[(
+                        ielem * cell_ngp * cell_ngp + itest_func,
+                        ielem * cell_ngp * cell_ngp + kgp * cell_ngp + igp,
+                    )] += weights[edge_gp] * dtransformed_flux_du * phi;
+                    dx.slice_mut(s![ielem * cell_ngp * cell_ngp + itest_func, ..])
+                        .scaled_add(weights[edge_gp] * phi, &dtransformed_flux_dx);
+                    dy.slice_mut(s![ielem * cell_ngp * cell_ngp + itest_func, ..])
+                        .scaled_add(weights[edge_gp] * phi, &dtransformed_flux_dy);
+                }
             }
         }
     }
@@ -592,7 +744,6 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         self.enriched_boundary_condition(enriched_residuals, enriched_sol.view());
     }
     */
-
     #[autodiff(
         dvolume, Reverse, Const, Const, Const, Duplicated, Duplicated, Duplicated, Active
     )]
@@ -1653,117 +1804,6 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         }
     }
     /*
-    fn enriched_boundary_condition(&self, mut res: ArrayViewMut3<f64>, sol: ArrayView3<f64>) {
-        let cell_ngp = self.solver_param.cell_gp_num + 1;
-        let weights = &self.enriched_basis.cell_gauss_weights;
-        for iedge in 0..6 {
-            let edge = &self.mesh.edges[iedge];
-            let ielem = edge.parents[0];
-            let elem = &self.mesh.elements[ielem];
-            // lower boundary
-            if iedge == 0 || iedge == 1 {
-                for itest_func in 0..cell_ngp * cell_ngp {
-                    let itest_func_x = itest_func % cell_ngp; // spatial index
-                    let itest_func_t = itest_func / cell_ngp; // temporal index
-                    for kgp in 0..cell_ngp {
-                        let u = { if iedge == 0 { 2.0 } else { 0.0 } };
-                        let phi = self.enriched_basis.phis_cell_gps[[kgp, itest_func_x]]
-                            * self.enriched_basis.phis_cell_gps[[0, itest_func_t]];
-                        let jacob_det = elem.enriched_jacob_det[[0, kgp]];
-                        let jacob_inv_t: ArrayView2<f64> =
-                            elem.enriched_jacob_inv_t.slice(s![0, kgp, .., ..]);
-                        let n_ref = [0.0, -1.0];
-                        let n_ref_array: Array1<f64> = Array1::from_vec(n_ref.to_vec());
-                        let transformed_normal: Array1<f64> = jacob_inv_t.dot(&n_ref_array);
-                        let normal_magnitude =
-                            (transformed_normal[0].powi(2) + transformed_normal[1].powi(2)).sqrt();
-                        let scaling = jacob_det * normal_magnitude;
-                        let flux = -u;
-                        let transformed_flux = scaling * flux;
-                        res[[ielem, itest_func, 0]] += weights[kgp] * phi * transformed_flux;
-                    }
-                }
-            }
-            // upper boundary
-            if iedge == 3 || iedge == 4 {
-                for itest_func in 0..cell_ngp * cell_ngp {
-                    let itest_func_x = itest_func % cell_ngp; // spatial index
-                    let itest_func_t = itest_func / cell_ngp; // temporal index
-                    for kgp in 0..cell_ngp {
-                        let u = sol[[ielem, cell_ngp * cell_ngp - 1 - kgp, 0]];
-                        let phi = self.enriched_basis.phis_cell_gps
-                            [[cell_ngp - 1 - kgp, itest_func_x]]
-                            * self.enriched_basis.phis_cell_gps[[cell_ngp - 1, itest_func_t]];
-                        let jacob_det = elem.enriched_jacob_det[[cell_ngp - 1, cell_ngp - 1 - kgp]];
-                        let jacob_inv_t: ArrayView2<f64> = elem.enriched_jacob_inv_t.slice(s![
-                            cell_ngp - 1,
-                            cell_ngp - 1 - kgp,
-                            ..,
-                            ..
-                        ]);
-                        let n_ref = [0.0, 1.0];
-                        let n_ref_array: Array1<f64> = Array1::from_vec(n_ref.to_vec());
-                        let transformed_normal: Array1<f64> = jacob_inv_t.dot(&n_ref_array);
-                        let normal_magnitude =
-                            (transformed_normal[0].powi(2) + transformed_normal[1].powi(2)).sqrt();
-                        let scaling = jacob_det * normal_magnitude;
-                        let flux = u;
-                        let transformed_flux = scaling * flux;
-                        res[[ielem, itest_func, 0]] += weights[kgp] * phi * transformed_flux;
-                    }
-                }
-            }
-            // right boundary
-            if iedge == 2 {
-                for itest_func in 0..cell_ngp * cell_ngp {
-                    let itest_func_x = itest_func % cell_ngp; // spatial index
-                    let itest_func_t = itest_func / cell_ngp; // temporal index
-                    for kgp in 0..cell_ngp {
-                        let u = sol[[ielem, cell_ngp - 1 + kgp * cell_ngp, 0]];
-                        let phi = self.enriched_basis.phis_cell_gps[[cell_ngp - 1, itest_func_x]]
-                            * self.enriched_basis.phis_cell_gps[[kgp, itest_func_t]];
-                        let jacob_det = elem.enriched_jacob_det[[kgp, cell_ngp - 1]];
-                        let jacob_inv_t: ArrayView2<f64> =
-                            elem.enriched_jacob_inv_t
-                                .slice(s![kgp, cell_ngp - 1, .., ..]);
-                        let n_ref = [1.0, 0.0];
-                        let n_ref_array: Array1<f64> = Array1::from_vec(n_ref.to_vec());
-                        let transformed_normal: Array1<f64> = jacob_inv_t.dot(&n_ref_array);
-                        let normal_magnitude =
-                            (transformed_normal[0].powi(2) + transformed_normal[1].powi(2)).sqrt();
-                        let scaling = jacob_det * normal_magnitude;
-                        let flux = self.advection_speed * u;
-                        let transformed_flux = scaling * flux;
-                        res[[ielem, itest_func, 0]] += weights[kgp] * phi * transformed_flux;
-                    }
-                }
-            }
-            // left boundary
-            if iedge == 5 {
-                for itest_func in 0..cell_ngp * cell_ngp {
-                    let itest_func_x = itest_func % cell_ngp; // spatial index
-                    let itest_func_t = itest_func / cell_ngp; // temporal index
-                    for kgp in 0..cell_ngp {
-                        let u = 2.0;
-                        let phi = self.enriched_basis.phis_cell_gps[[0, itest_func_x]]
-                            * self.enriched_basis.phis_cell_gps[[kgp, itest_func_t]];
-                        let jacob_det = elem.enriched_jacob_det[[kgp, 0]];
-                        let jacob_inv_t: ArrayView2<f64> =
-                            elem.enriched_jacob_inv_t.slice(s![kgp, 0, .., ..]);
-                        let n_ref = [-1.0, 0.0];
-                        let n_ref_array: Array1<f64> = Array1::from_vec(n_ref.to_vec());
-                        let transformed_normal: Array1<f64> = jacob_inv_t.dot(&n_ref_array);
-                        let normal_magnitude =
-                            (transformed_normal[0].powi(2) + transformed_normal[1].powi(2)).sqrt();
-                        let scaling = jacob_det * normal_magnitude;
-                        let flux = -self.advection_speed * u;
-                        let transformed_flux = scaling * flux;
-                        res[[ielem, itest_func, 0]] += weights[kgp] * phi * transformed_flux;
-                    }
-                }
-            }
-        }
-    }
     fn boundary_residual_derivatives(
         &mut self,
         solutions: ArrayView3<f64>,

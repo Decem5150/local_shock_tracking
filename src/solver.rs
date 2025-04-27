@@ -25,14 +25,14 @@ pub struct FlowParameters {
 pub struct ShockTrackingSolver<'a> {
     pub solutions: Array<f64, Ix2>,
     pub disc: Disc1dAdvectionSpaceTime<'a>,
-    pub mesh: &'a Mesh2d,
+    // pub mesh: &'a Mesh2d,
     pub solver_params: &'a SolverParameters,
 }
 impl<'a> ShockTrackingSolver<'a> {
     pub fn new(
         basis: LagrangeBasis1DLobatto,
         enriched_basis: LagrangeBasis1DLobatto,
-        mesh: &'a Mesh2d,
+        mesh: &'a mut Mesh2d,
         solver_params: &'a SolverParameters,
     ) -> Self {
         let solutions = Array::zeros((
@@ -43,7 +43,7 @@ impl<'a> ShockTrackingSolver<'a> {
         Self {
             solutions,
             disc,
-            mesh,
+            // mesh,
             solver_params,
         }
     }
