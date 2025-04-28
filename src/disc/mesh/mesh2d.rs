@@ -74,7 +74,7 @@ impl Mesh2d {
                 local_ids: vec![2],
             },
             Node {
-                x: 0.9,
+                x: 1.1,
                 y: 1.0,
                 parents: vec![0, 1],
                 local_ids: vec![2, 3],
