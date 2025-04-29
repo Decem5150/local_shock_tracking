@@ -237,6 +237,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         }
         enriched_solutions
     }
+    /*
     fn solve_linear_subproblem(
         &self,
         dsol: ArrayView2<f64>,
@@ -252,6 +253,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         let mut obj_dx: Array1<f64> = Array1::zeros(2);
         for ielem in 0..nelem {}
     }
+    */
     fn compute_residuals_and_derivatives(
         &mut self,
         solutions: ArrayView2<f64>,
