@@ -7,7 +7,7 @@ use ndarray::{Array, ArrayView1, Ix1};
 //     pub boundary_type: BoundaryType,
 //     pub boundary_quantity: Option<BoundaryQuantity1d>,
 // }
-
+#[derive(Clone)]
 pub struct Node {
     pub x: f64,
     pub y: f64,
@@ -74,7 +74,7 @@ impl Mesh1d {
         let internal_nodes = (1..node_num - 1).collect();
 
         let boundary_nodes = vec![0, elem_num];
-        let mut mesh1d = Self {
+        let mesh1d = Self {
             nodes,
             elements,
             internal_nodes,

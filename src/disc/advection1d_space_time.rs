@@ -2,10 +2,11 @@ pub mod boundary_condition;
 mod flux;
 mod riemann_solver;
 mod shock_tracking;
-use faer::{Col, Mat, mat};
-use faer_ext::*;
+use faer::{Col, Mat, linalg::solvers::DenseSolveCore, mat, prelude::Solve};
+use faer_ext::{IntoFaer, IntoNdarray};
 use flux::space_time_flux1d;
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, array, s};
+use ndarray::{Array, Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, array, s};
+use ndarray_stats::QuantileExt;
 use riemann_solver::smoothed_upwind;
 use std::autodiff::autodiff;
 
@@ -47,6 +48,26 @@ fn evaluate_jacob(eta: f64, xi: f64, x: &[f64], y: &[f64]) -> (f64, [f64; 4]) {
     ];
     (jacob_det, jacob_inv_t)
 }
+struct Sqp {
+    c: f64,
+    tau: f64,
+    epsilon1: f64,
+    epsilon2: f64,
+    max_line_search_iter: usize,
+    max_sqp_iter: usize,
+}
+impl Sqp {
+    fn new(mesh: &Mesh2d) -> Self {
+        Self {
+            c: 1e-4,
+            tau: 0.5,
+            epsilon1: 1e-5,
+            epsilon2: 1e-10,
+            max_line_search_iter: 10,
+            max_sqp_iter: 100,
+        }
+    }
+}
 pub struct Disc1dAdvectionSpaceTime<'a> {
     pub current_iter: usize,
     pub basis: LagrangeBasis1DLobatto,
@@ -76,129 +97,244 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             advection_speed: 0.1,
         }
     }
+    #[allow(non_snake_case)]
+    fn solve_linear_subproblem(
+        &self,
+        node_constraints: ArrayView2<f64>,
+        res: ArrayView2<f64>,
+        hessian_uu: ArrayView2<f64>,
+        hessian_ux: ArrayView2<f64>,
+        hessian_xx: ArrayView2<f64>,
+        dsol: ArrayView2<f64>,
+        dx: ArrayView2<f64>,
+        obj_dsol: ArrayView1<f64>,
+        obj_dx: ArrayView1<f64>,
+    ) -> (Array1<f64>, Array1<f64>) {
+        let nelem = self.mesh.elem_num;
+        let unenriched_cell_ngp = self.solver_param.cell_gp_num;
+        let free_x = &self.mesh.free_x;
+        let num_u = nelem * unenriched_cell_ngp * unenriched_cell_ngp;
+        let num_x: usize = free_x.len();
+        let num_lambda = num_u;
+        let n_total = num_u + num_x + num_lambda;
+
+        let mut A_ndarray = Array2::<f64>::zeros((n_total, n_total));
+        let mut b_ndarray = Array1::<f64>::zeros(n_total);
+
+        A_ndarray
+            .slice_mut(s![0..num_u, 0..num_u])
+            .assign(&hessian_uu);
+        A_ndarray
+            .slice_mut(s![0..num_u, num_u..num_u + num_x])
+            .assign(&hessian_ux);
+        A_ndarray
+            .slice_mut(s![0..num_u, num_u + num_x..n_total])
+            .assign(&dsol.t());
+
+        A_ndarray
+            .slice_mut(s![num_u..num_u + num_x, 0..num_u])
+            .assign(&hessian_ux.t());
+        A_ndarray
+            .slice_mut(s![num_u..num_u + num_x, num_u..num_u + num_x])
+            .assign(&hessian_xx);
+        A_ndarray
+            .slice_mut(s![num_u..num_u + num_x, num_u + num_x..n_total])
+            .assign(&dx.dot(&node_constraints).t());
+
+        A_ndarray
+            .slice_mut(s![num_u + num_x..n_total, 0..num_u])
+            .assign(&dsol);
+        A_ndarray
+            .slice_mut(s![num_u + num_x..n_total, num_u..num_u + num_x])
+            .assign(&dx.dot(&node_constraints));
+
+        b_ndarray
+            .slice_mut(s![0..num_u])
+            .assign(&(&obj_dsol * -1.0));
+        b_ndarray
+            .slice_mut(s![num_u..num_u + num_x])
+            .assign(&(&obj_dx * -1.0));
+        b_ndarray
+            .slice_mut(s![num_u + num_x..n_total])
+            .assign(&res.flatten());
+
+        let A = A_ndarray.view().into_faer();
+        let b = Col::<f64>::from_iter(b_ndarray.view().iter().copied());
+        let flu = A.partial_piv_lu();
+        let u_x_lambda = flu.solve(&b);
+
+        let delta_u = u_x_lambda.subrows(0, num_u);
+        let delta_x = u_x_lambda.subrows(num_u, num_x);
+
+        let delta_u_ndarray = Array1::from_iter(delta_u.iter().copied());
+        let delta_x_ndarray = Array1::from_iter(delta_x.iter().copied());
+        (delta_u_ndarray, delta_x_ndarray)
+    }
+    #[allow(non_snake_case)]
     pub fn solve(&mut self, mut solutions: ArrayViewMut2<f64>) {
         let nelem = self.mesh.elem_num;
         let nnode = self.mesh.node_num;
-        let cell_ngp = self.solver_param.cell_gp_num;
-        let enriched_cell_ngp = cell_ngp + 1;
-        let mut residuals: Array2<f64> = Array2::zeros((nelem, cell_ngp * cell_ngp));
-        let mut dsol: Array2<f64> =
-            Array2::zeros((nelem * cell_ngp * cell_ngp, nelem * cell_ngp * cell_ngp));
-        let mut dx: Array2<f64> = Array2::zeros((nelem * cell_ngp * cell_ngp, nnode));
-        let mut dy: Array2<f64> = Array2::zeros((nelem * cell_ngp * cell_ngp, nnode));
+        let unenriched_cell_ngp = self.solver_param.cell_gp_num;
+        let enriched_cell_ngp = unenriched_cell_ngp + 1;
+        let epsilon1 = 1e-5;
+        let epsilon2 = 1e-10;
+        let max_line_search_iter = 10;
+        let max_sqp_iter = 2;
+        let interior_nnodes: usize = 0;
+        let free_x: [usize; 1] = [4];
+        let mut node_constraints: Array2<f64> =
+            Array2::zeros((2 * nnode, 2 * interior_nnodes + free_x.len()));
+        node_constraints[(4, 0)] = 1.0;
 
-        self.compute_residuals_and_derivatives(
-            solutions.view(),
-            residuals.view_mut(),
-            dsol.view_mut(),
-            dx.view_mut(),
-            dy.view_mut(),
-            false,
-        );
-        // print residuals
-        println!("residuals: {:?}", residuals);
-        println!("dsol_AD: {:?}", dsol.slice(s![.., 5]));
-        println!("dleftx_AD: {:?}", dx.slice(s![0..cell_ngp * cell_ngp, 4]));
-        println!("drightx_AD: {:?}", dx.slice(s![cell_ngp * cell_ngp.., 4]));
-        //println!("dy: {:?}", dy);
-        /*
-        // perturb solution
-        solutions[(0, 5)] += 1e-4;
-        self.compute_residuals_and_derivatives(
-            solutions.view(),
-            residuals.view_mut(),
-            dsol.view_mut(),
-            dx.view_mut(),
-            dy.view_mut(),
-        );
-
-        let dsol_FD = (&residuals - &residual_unperturbed) / 1e-4;
-        println!("dsol_FD: {:?}", dsol_FD);
-        residuals.fill(0.0);
-        dsol.fill(0.0);
-        dx.fill(0.0);
-        dy.fill(0.0);
-        */
-        /*
-        // perturb x[4]
-        self.mesh.nodes[4].x += 1e-6;
-        self.compute_residuals_and_derivatives(
-            solutions.view(),
-            residuals.view_mut(),
-            dsol.view_mut(),
-            dx.view_mut(),
-            dy.view_mut(),
-        );
-        let dx_FD = (&residuals - residual_unperturbed) / 1e-6;
-        println!("dx_FD: {:?}", dx_FD);
-        */
-
-        let enriched_solutions = self.interpolate_to_enriched(solutions.view());
-        println!("enriched_solutions: {:?}", enriched_solutions);
+        let mut residuals: Array2<f64> =
+            Array2::zeros((nelem, unenriched_cell_ngp * unenriched_cell_ngp));
+        let mut dsol: Array2<f64> = Array2::zeros((
+            nelem * unenriched_cell_ngp * unenriched_cell_ngp,
+            nelem * unenriched_cell_ngp * unenriched_cell_ngp,
+        ));
+        let mut dx: Array2<f64> =
+            Array2::zeros((nelem * unenriched_cell_ngp * unenriched_cell_ngp, 2 * nnode));
         let mut enriched_residuals: Array2<f64> =
             Array2::zeros((nelem, enriched_cell_ngp * enriched_cell_ngp));
         let mut enriched_dsol: Array2<f64> = Array2::zeros((
             nelem * enriched_cell_ngp * enriched_cell_ngp,
-            nelem * cell_ngp * cell_ngp,
+            nelem * unenriched_cell_ngp * unenriched_cell_ngp,
         ));
         let mut enriched_dx: Array2<f64> =
-            Array2::zeros((nelem * enriched_cell_ngp * enriched_cell_ngp, nnode));
-        let mut enriched_dy: Array2<f64> =
-            Array2::zeros((nelem * enriched_cell_ngp * enriched_cell_ngp, nnode));
-        self.compute_residuals_and_derivatives(
-            enriched_solutions.view(),
-            enriched_residuals.view_mut(),
-            enriched_dsol.view_mut(),
-            enriched_dx.view_mut(),
-            enriched_dy.view_mut(),
-            true,
-        );
-        println!("enriched_residuals: {:?}", enriched_residuals);
-        println!("enriched_dsol_AD: {:?}", enriched_dsol.slice(s![.., 5]));
-        println!(
-            "dleftx_AD: {:?}",
-            enriched_dx.slice(s![0..enriched_cell_ngp * enriched_cell_ngp, 4])
-        );
-        println!(
-            "drightx_AD: {:?}",
-            enriched_dx.slice(s![enriched_cell_ngp * enriched_cell_ngp.., 4])
-        );
-        // perturb solution
-        let mut enriched_residuals_unperturbed = enriched_residuals.clone();
-        enriched_residuals.fill(0.0);
-        enriched_dsol.fill(0.0);
-        enriched_dx.fill(0.0);
-        enriched_dy.fill(0.0);
-        solutions[(0, 5)] += 1e-4;
-        let enriched_solutions_perturbed = self.interpolate_to_enriched(solutions.view());
-        self.compute_residuals_and_derivatives(
-            enriched_solutions_perturbed.view(),
-            enriched_residuals.view_mut(),
-            enriched_dsol.view_mut(),
-            enriched_dx.view_mut(),
-            enriched_dy.view_mut(),
-            true,
-        );
-        let enriched_dsol_FD = (&enriched_residuals - &enriched_residuals_unperturbed) / 1e-4;
-        println!("enriched_dsol_FD: {:?}", enriched_dsol_FD);
-        // perturb x[4]
-        enriched_residuals.fill(0.0);
-        enriched_dsol.fill(0.0);
-        enriched_dx.fill(0.0);
-        enriched_dy.fill(0.0);
-        solutions[(0, 5)] -= 1e-4;
-        self.mesh.nodes[4].x += 1e-6;
-        let enriched_solutions_perturbed = self.interpolate_to_enriched(solutions.view());
-        self.compute_residuals_and_derivatives(
-            enriched_solutions_perturbed.view(),
-            enriched_residuals.view_mut(),
-            enriched_dsol.view_mut(),
-            enriched_dx.view_mut(),
-            enriched_dy.view_mut(),
-            true,
-        );
-        let enriched_dx_FD = (&enriched_residuals - &enriched_residuals_unperturbed) / 1e-6;
-        println!("enriched_dx_FD: {:?}", enriched_dx_FD);
+            Array2::zeros((nelem * enriched_cell_ngp * enriched_cell_ngp, 2 * nnode));
+
+        let mut iter: usize = 0;
+        while iter < max_sqp_iter {
+            // reset residuals, dsol, dx, enriched_residuals, enriched_dsol, enriched_dx
+            residuals.fill(0.0);
+            dsol.fill(0.0);
+            dx.fill(0.0);
+            enriched_residuals.fill(0.0);
+            enriched_dsol.fill(0.0);
+            enriched_dx.fill(0.0);
+
+            self.compute_residuals_and_derivatives(
+                solutions.view(),
+                residuals.view_mut(),
+                dsol.view_mut(),
+                dx.view_mut(),
+                false,
+            );
+            println!("residuals: {:?}", residuals);
+
+            let enriched_solutions = self.interpolate_to_enriched(solutions.view());
+            self.compute_residuals_and_derivatives(
+                enriched_solutions.view(),
+                enriched_residuals.view_mut(),
+                enriched_dsol.view_mut(),
+                enriched_dx.view_mut(),
+                true,
+            );
+            println!("enriched_residuals: {:?}", enriched_residuals);
+            println!("enriched_dsol_AD: {:?}", enriched_dsol.slice(s![.., 5]));
+
+            let obj_dsol = enriched_dsol.t().dot(&enriched_residuals.flatten());
+            let obj_dx = enriched_dx
+                .t()
+                .dot(&enriched_residuals.flatten())
+                .dot(&node_constraints);
+
+            let hessian_uu = enriched_dsol.t().dot(&enriched_dsol);
+            println!("hessian_uu: {:?}", hessian_uu);
+            let hessian_ux = enriched_dsol.t().dot(&enriched_dx.dot(&node_constraints));
+            println!("hessian_ux: {:?}", hessian_ux);
+            let mut hessian_xx = enriched_dx
+                .dot(&node_constraints)
+                .t()
+                .dot(&enriched_dx.dot(&node_constraints));
+            println!("hessian_xx: {:?}", hessian_xx);
+            // add an identity matrix to hessian_xx
+            hessian_xx += &(1e-3 * &Array2::eye(2 * interior_nnodes + free_x.len()));
+
+            let (delta_u, delta_x) = self.solve_linear_subproblem(
+                node_constraints.view(),
+                residuals.view(),
+                hessian_uu.view(),
+                hessian_ux.view(),
+                hessian_xx.view(),
+                dsol.view(),
+                dx.view(),
+                obj_dsol.view(),
+                obj_dx.view(),
+            );
+
+            // backtracking line search
+            let dsol_inv = dsol.view().into_faer().full_piv_lu().inverse();
+            let dsol_inv_t = dsol_inv.transpose().into_ndarray();
+            let obj_dsol_t = obj_dsol.t();
+            let lambda_hat = dsol_inv_t.dot(&obj_dsol_t);
+            let mu = lambda_hat.mapv(f64::abs).max().copied().unwrap() * 2.0;
+            let mut merit_func = |alpha: f64| -> f64 {
+                let mut tmp_mesh = self.mesh.clone();
+                let delta_u_ndarray = Array::from_iter(delta_u.iter().copied());
+                let u_flat = &solutions.flatten() + alpha * &delta_u_ndarray;
+                let u = u_flat
+                    .to_shape((nelem, unenriched_cell_ngp * unenriched_cell_ngp))
+                    .unwrap();
+                tmp_mesh.nodes[free_x[0]].x += alpha * delta_x[0];
+                let mut tmp_res = Array2::zeros((nelem, unenriched_cell_ngp * unenriched_cell_ngp));
+                self.compute_residuals(&tmp_mesh, u.view(), tmp_res.view_mut(), false);
+                let enriched_u = self.interpolate_to_enriched(u.view());
+                let mut tmp_enr_res = Array2::zeros((nelem, enriched_cell_ngp * enriched_cell_ngp));
+                self.compute_residuals(&tmp_mesh, enriched_u.view(), tmp_enr_res.view_mut(), true);
+                let f = 0.5 * &tmp_enr_res.flatten().dot(&tmp_enr_res.flatten());
+                let l1_norm = tmp_res.mapv(f64::abs).sum();
+
+                f + mu * l1_norm
+            };
+
+            let merit_func_0 = merit_func(0.0);
+            let dir_deriv =
+                obj_dsol.dot(&delta_u) + obj_dx.dot(&delta_x) - mu * residuals.mapv(f64::abs).sum();
+            let c: f64 = 1e-4;
+            let tau: f64 = 0.5;
+            let mut n: i32 = 1;
+            let mut alpha: f64 = tau.powi(n - 1);
+            let mut line_search_iter: usize = 0;
+            while line_search_iter < max_line_search_iter {
+                if merit_func(alpha) <= merit_func_0 + c * alpha * dir_deriv {
+                    break;
+                }
+                alpha *= tau;
+                n += 1;
+                line_search_iter += 1;
+            }
+            if line_search_iter == max_line_search_iter {
+                panic!(
+                    "Warning: Line search did not converge within {} iterations.",
+                    max_line_search_iter
+                );
+            }
+            solutions.scaled_add(alpha, &delta_u.to_shape(solutions.shape()).unwrap());
+            self.mesh
+                .nodes
+                .iter_mut()
+                .enumerate()
+                .for_each(|(i, node)| {
+                    node.x += alpha * delta_x[i];
+                });
+
+            // termination criteria
+            let optimality = &obj_dx.t()
+                - &dx
+                    .dot(&node_constraints)
+                    .t()
+                    .dot(&dsol_inv_t)
+                    .dot(&obj_dsol.t());
+            residuals.fill(0.0);
+            self.compute_residuals(self.mesh, solutions.view(), residuals.view_mut(), false);
+            if optimality.mapv(f64::abs).sum() < epsilon1
+                && residuals.mapv(f64::abs).sum() < epsilon2
+            {
+                break;
+            }
+            iter += 1;
+        }
     }
     fn compute_interp_matrix(
         basis: &LagrangeBasis1DLobatto,
@@ -241,120 +377,231 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         enriched_solutions
     }
 
-    fn sqp(
+    fn compute_residuals(
         &self,
-        res: ArrayView2<f64>,
-        dsol: ArrayView2<f64>,
-        dx: ArrayView2<f64>,
-        dy: ArrayView2<f64>,
-        enriched_res: ArrayView2<f64>,
-        enriched_dsol: ArrayView2<f64>,
-        enriched_dx: ArrayView2<f64>,
-        enriched_dy: ArrayView2<f64>,
-    ) -> (Array1<f64>, Array1<f64>, Array1<f64>) {
-        let nelem = self.mesh.elem_num;
-        let nnode = self.mesh.node_num;
-        let unenriched_cell_ngp = self.solver_param.cell_gp_num;
-        let enriched_cell_ngp = unenriched_cell_ngp + 1;
-        let mut obj_dsol: Array1<f64> =
-            Array1::zeros(nelem * unenriched_cell_ngp * unenriched_cell_ngp);
-        let mut obj_dx: Array1<f64> = Array1::zeros(2);
-        let mut delta_u: Array1<f64> =
-            Array1::zeros(nelem * unenriched_cell_ngp * unenriched_cell_ngp);
-        let mut delta_x: Array1<f64> = Array1::zeros(2);
-        let mut delta_y: Array1<f64> = Array1::zeros(2);
-        let mut hessian_uu: Array2<f64> = Array2::zeros((
-            unenriched_cell_ngp * unenriched_cell_ngp,
-            unenriched_cell_ngp * unenriched_cell_ngp,
-        ));
-        let mut hessian_ux: Array2<f64> =
-            Array2::zeros((unenriched_cell_ngp * unenriched_cell_ngp, nnode));
-        let mut hessian_xx: Array2<f64> = Array2::zeros((nnode, nnode));
-
-        for itest_func in 0..nelem * enriched_cell_ngp * enriched_cell_ngp {
-            for isol in 0..nelem * unenriched_cell_ngp * unenriched_cell_ngp {
-                obj_dsol[isol] +=
-                    enriched_res.flatten()[itest_func] * enriched_dsol[(itest_func, isol)];
+        mesh: &Mesh2d,
+        solutions: ArrayView2<f64>,
+        mut residuals: ArrayViewMut2<f64>,
+        is_enriched: bool,
+    ) {
+        let nelem = mesh.elem_num;
+        let cell_ngp = {
+            if is_enriched {
+                self.solver_param.cell_gp_num + 1
+            } else {
+                self.solver_param.cell_gp_num
             }
-            for inode in 0..nnode {
-                obj_dx[inode] +=
-                    enriched_res.flatten()[itest_func] * enriched_dx[(itest_func, inode)];
-                /*
-                obj_dy[inode] +=
-                    enriched_res.flatten()[itest_func] * enriched_dy[(itest_func, inode)];
-                */
+        };
+        let basis = {
+            if is_enriched {
+                &self.enriched_basis
+            } else {
+                &self.basis
+            }
+        };
+        let weights = &basis.cell_gauss_weights;
+        for ielem in 0..nelem {
+            let inodes = &mesh.elements[ielem].inodes;
+            let mut x_slice = [0.0; 4];
+            let mut y_slice = [0.0; 4];
+            for i in 0..4 {
+                x_slice[i] = mesh.nodes[inodes[i]].x;
+                y_slice[i] = mesh.nodes[inodes[i]].y;
+            }
+            for itest_func in 0..cell_ngp * cell_ngp {
+                let itest_func_eta = itest_func / cell_ngp;
+                let itest_func_xi = itest_func % cell_ngp;
+                let res = self.volume_integral(
+                    basis,
+                    itest_func_eta,
+                    itest_func_xi,
+                    solutions.slice(s![ielem, ..]).as_slice().unwrap(),
+                    x_slice.as_slice(),
+                    y_slice.as_slice(),
+                );
+                residuals[(ielem, itest_func)] += res;
             }
         }
-        hessian_uu.assign(&enriched_dsol.t().dot(&enriched_dsol));
-        hessian_ux.assign(&enriched_dsol.t().dot(&enriched_dx));
-        hessian_xx.assign(&enriched_dx.t().dot(&enriched_dx));
-        // add an identity matrix to hessian_xx
-        hessian_xx += 1e-3 * Array2::eye(nnode);
+        for &iedge in mesh.internal_edges.iter() {
+            let edge = &mesh.edges[iedge];
+            let left_ref_normal = [1.0, 0.0];
+            let right_ref_normal = [-1.0, 0.0];
+            let ilelem = edge.parents[0];
+            let irelem = edge.parents[1];
+            let left_elem = &mesh.elements[ilelem];
+            let right_elem = &mesh.elements[irelem];
+            let (mut left_x, mut left_y, mut right_x, mut right_y) =
+                ([0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4]);
+            for i in 0..4 {
+                left_x[i] = mesh.nodes[left_elem.inodes[i]].x;
+                left_y[i] = mesh.nodes[left_elem.inodes[i]].y;
+                right_x[i] = mesh.nodes[right_elem.inodes[i]].x;
+                right_y[i] = mesh.nodes[right_elem.inodes[i]].y;
+            }
+            let common_edge = [edge.local_ids[0], edge.local_ids[1]];
+            let mut grouped_x: [f64; 6] = [0.0; 6];
+            let mut grouped_y: [f64; 6] = [0.0; 6];
+            let mut grouped_index = 0;
+            let mut left_nodes_ids: [usize; 4] = [0; 4]; // ids in grouped nodes
+            let mut right_nodes_ids: [usize; 4] = [0; 4]; // ids in grouped nodes
+            for i in 0..4 {
+                if i != common_edge[0] && i != (common_edge[0] + 1) % 4 {
+                    grouped_x[grouped_index] = left_x[i];
+                    grouped_y[grouped_index] = left_y[i];
+                    left_nodes_ids[i] = grouped_index;
+                    grouped_index += 1;
+                }
+            }
+            for i in 0..4 {
+                if i != common_edge[1] && i != (common_edge[1] + 1) % 4 {
+                    grouped_x[grouped_index] = right_x[i];
+                    grouped_y[grouped_index] = right_y[i];
+                    right_nodes_ids[i] = grouped_index;
+                    grouped_index += 1;
+                }
+            }
+            grouped_x[4] = left_x[common_edge[0]];
+            grouped_x[5] = left_x[(common_edge[0] + 1) % 4];
+            grouped_y[4] = left_y[common_edge[0]];
+            grouped_y[5] = left_y[(common_edge[0] + 1) % 4];
+            left_nodes_ids[common_edge[0]] = 4;
+            left_nodes_ids[(common_edge[0] + 1) % 4] = 5;
+            right_nodes_ids[common_edge[1]] = 4;
+            right_nodes_ids[(common_edge[1] + 1) % 4] = 5;
 
-        // assemble the linear system
-        let num_u: usize = nelem * unenriched_cell_ngp * unenriched_cell_ngp;
-        let num_x: usize = 1;
-        let num_lambda = num_u;
-        let n_total = num_u + num_x + num_lambda;
+            let left_sol_slice = solutions.slice(s![ilelem, ..]);
+            let right_sol_slice = solutions.slice(s![irelem, ..]);
+            for itest_func in 0..cell_ngp * cell_ngp {
+                let itest_func_eta = itest_func / cell_ngp;
+                let itest_func_xi = itest_func % cell_ngp;
+                for edge_gp in 0..cell_ngp {
+                    // Map quadrature points based on edge orientation
+                    let left_kgp = edge_gp;
+                    let left_igp = cell_ngp - 1;
+                    let right_kgp = edge_gp;
+                    let right_igp = 0;
+                    let left_eta = basis.cell_gauss_points[left_kgp];
+                    let left_xi = basis.cell_gauss_points[left_igp];
+                    let right_eta = basis.cell_gauss_points[right_kgp];
+                    let right_xi = basis.cell_gauss_points[right_igp];
+                    let left_value = left_sol_slice[left_igp + left_kgp * cell_ngp];
+                    let right_value = right_sol_slice[right_igp + right_kgp * cell_ngp];
+                    let num_flux = self.compute_numerical_flux(
+                        self.advection_speed,
+                        left_value,
+                        right_value,
+                        left_x[common_edge[0]],
+                        left_x[(common_edge[0] + 1) % 4],
+                        left_y[common_edge[0]],
+                        left_y[(common_edge[0] + 1) % 4],
+                    );
+                    let left_scaling = self.compute_flux_scaling(
+                        left_eta,
+                        left_xi,
+                        left_ref_normal,
+                        left_x.as_slice(),
+                        left_y.as_slice(),
+                    );
+                    let right_scaling = self.compute_flux_scaling(
+                        right_eta,
+                        right_xi,
+                        right_ref_normal,
+                        right_x.as_slice(),
+                        right_y.as_slice(),
+                    );
 
-        let mut A_ndarray = Array2::<f64>::zeros((n_total, n_total));
-        let mut b_ndarray = Array1::<f64>::zeros(n_total);
+                    let left_transformed_flux = num_flux * left_scaling;
+                    let right_transformed_flux = -num_flux * right_scaling;
 
-        A_ndarray
-            .slice_mut(s![0..num_u, 0..num_u])
-            .assign(&hessian_uu);
-        A_ndarray
-            .slice_mut(s![0..num_u, num_u..num_u + num_x])
-            .assign(&hessian_ux);
-        A_ndarray
-            .slice_mut(s![0..num_u, num_u + num_x..n_total])
-            .assign(&dsol.t());
+                    let left_phi = basis.phis_cell_gps[[itest_func_xi, left_igp]]
+                        * basis.phis_cell_gps[[itest_func_eta, left_kgp]];
+                    let right_phi = basis.phis_cell_gps[[itest_func_xi, right_igp]]
+                        * basis.phis_cell_gps[[itest_func_eta, right_kgp]];
 
-        A_ndarray
-            .slice_mut(s![num_u..num_u + num_x, 0..num_u])
-            .assign(&hessian_ux.t());
-        A_ndarray
-            .slice_mut(s![num_u..num_u + num_x, num_u..num_u + num_x])
-            .assign(&hessian_xx);
-        A_ndarray
-            .slice_mut(s![num_u..num_u + num_x, num_u + num_x..n_total])
-            .assign(&dx.t());
+                    residuals[(ilelem, itest_func)] +=
+                        weights[edge_gp] * left_transformed_flux * left_phi;
+                    residuals[(irelem, itest_func)] +=
+                        weights[edge_gp] * right_transformed_flux * right_phi;
+                }
+            }
+        }
 
-        A_ndarray
-            .slice_mut(s![num_u + num_x..n_total, 0..num_u])
-            .assign(&dsol);
-        A_ndarray
-            .slice_mut(s![num_u + num_x..n_total, num_u..num_u + num_x])
-            .assign(&dx);
+        for &iedge in mesh.boundary_edges.iter() {
+            let edge = &mesh.edges[iedge];
+            let ielem = edge.parents[0];
 
-        b_ndarray
-            .slice_mut(s![0..num_u])
-            .assign(&(&enriched_dsol * -1.0));
-        b_ndarray
-            .slice_mut(s![num_u..num_u + num_x])
-            .assign(&(&enriched_dx * -1.0));
-        b_ndarray
-            .slice_mut(s![num_u + num_x..n_total])
-            .assign(&res.flatten());
-
-        let A: Mat<f64> = A_ndarray.view().into_faer();
-        let b: Col<f64> = b_ndarray.view().into_faer();
-        let flu = A.partial_piv_lu();
-        let u_x_lambda = flu.solve(&b);
-
-        (delta_u, delta_x, delta_y)
+            let elem = &mesh.elements[ielem];
+            let inodes = &elem.inodes;
+            let mut x_slice = [0.0; 4];
+            let mut y_slice = [0.0; 4];
+            for i in 0..4 {
+                x_slice[i] = self.mesh.nodes[inodes[i]].x;
+                y_slice[i] = self.mesh.nodes[inodes[i]].y;
+            }
+            let sol_slice = solutions.slice(s![ielem, ..]);
+            for itest_func in 0..cell_ngp * cell_ngp {
+                let itest_func_eta = itest_func / cell_ngp;
+                let itest_func_xi = itest_func % cell_ngp;
+                for edge_gp in 0..cell_ngp {
+                    let (kgp, igp, ref_normal) = match iedge {
+                        0 | 1 => (0, edge_gp, [0.0, -1.0]),
+                        2 => (edge_gp, cell_ngp - 1, [1.0, 0.0]),
+                        3 | 4 => (cell_ngp - 1, edge_gp, [0.0, 1.0]),
+                        5 => (edge_gp, 0, [-1.0, 0.0]),
+                        _ => unreachable!(),
+                    };
+                    let eta = basis.cell_gauss_points[kgp];
+                    let xi = basis.cell_gauss_points[igp];
+                    let flux = match iedge {
+                        0 => {
+                            let u = 2.0;
+                            -u
+                        }
+                        1 => {
+                            let u = 0.0;
+                            u
+                        }
+                        2 => {
+                            let u = sol_slice[kgp * cell_ngp + igp];
+                            self.advection_speed * u
+                        }
+                        3 | 4 => {
+                            let u = sol_slice[igp + kgp * cell_ngp];
+                            u
+                        }
+                        5 => {
+                            let u = 2.0;
+                            -self.advection_speed * u
+                        }
+                        _ => unreachable!(),
+                    };
+                    let scaling = self.compute_flux_scaling(
+                        eta,
+                        xi,
+                        ref_normal,
+                        x_slice.as_slice(),
+                        y_slice.as_slice(),
+                    );
+                    let transformed_flux = scaling * flux;
+                    let phi = basis.phis_cell_gps[(itest_func_eta, kgp)]
+                        * basis.phis_cell_gps[(itest_func_xi, igp)];
+                    residuals[(ielem, itest_func)] += weights[edge_gp] * phi * transformed_flux;
+                }
+            }
+        }
     }
 
     fn compute_residuals_and_derivatives(
-        &mut self,
+        &self,
         solutions: ArrayView2<f64>,
         mut residuals: ArrayViewMut2<f64>,
         mut dsol: ArrayViewMut2<f64>,
         mut dx: ArrayViewMut2<f64>,
-        mut dy: ArrayViewMut2<f64>,
+        // mut dy: ArrayViewMut2<f64>,
         is_enriched: bool,
     ) {
         let nelem = self.mesh.elem_num;
+        let nnode = self.mesh.node_num;
         let cell_ngp = {
             if is_enriched {
                 self.solver_param.cell_gp_num + 1
@@ -415,7 +662,10 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 }
                 for i in 0..4 {
                     dx[(ielem * cell_ngp * cell_ngp + itest_func, elem.inodes[i])] += dvol_x[i];
-                    dy[(ielem * cell_ngp * cell_ngp + itest_func, elem.inodes[i])] += dvol_y[i];
+                    dx[(
+                        ielem * cell_ngp * cell_ngp + itest_func,
+                        nnode + elem.inodes[i],
+                    )] += dvol_y[i];
                 }
                 /*
                 let res = self.volume_integral(
@@ -784,17 +1034,17 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                             ilelem * cell_ngp * cell_ngp + itest_func,
                             left_elem.inodes[i],
                         )] += weights[edge_gp] * left_phi * dleft_transformed_flux_dx[i];
-                        dy[(
+                        dx[(
                             ilelem * cell_ngp * cell_ngp + itest_func,
-                            left_elem.inodes[i],
+                            nnode + left_elem.inodes[i],
                         )] += weights[edge_gp] * left_phi * dleft_transformed_flux_dy[i];
                         dx[(
                             irelem * cell_ngp * cell_ngp + itest_func,
                             right_elem.inodes[i],
                         )] += weights[edge_gp] * right_phi * dright_transformed_flux_dx[i];
-                        dy[(
+                        dx[(
                             irelem * cell_ngp * cell_ngp + itest_func,
-                            right_elem.inodes[i],
+                            nnode + right_elem.inodes[i],
                         )] += weights[edge_gp] * right_phi * dright_transformed_flux_dy[i];
                     }
                     /*
@@ -814,11 +1064,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         for &iedge in self.mesh.boundary_edges.iter() {
             let edge = &self.mesh.edges[iedge];
             let ielem = edge.parents[0];
-
             let elem = &self.mesh.elements[ielem];
-            let inodes = &elem.inodes;
-            let mut x_slice = [0.0; 4];
-            let mut y_slice = [0.0; 4];
             let inodes = &self.mesh.elements[ielem].inodes;
             let mut x_slice = [0.0; 4];
             let mut y_slice = [0.0; 4];
@@ -911,8 +1157,10 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                     for i in 0..4 {
                         dx[(ielem * cell_ngp * cell_ngp + itest_func, elem.inodes[i])] +=
                             weights[edge_gp] * phi * dtransformed_flux_dx[i];
-                        dy[(ielem * cell_ngp * cell_ngp + itest_func, elem.inodes[i])] +=
-                            weights[edge_gp] * phi * dtransformed_flux_dy[i];
+                        dx[(
+                            ielem * cell_ngp * cell_ngp + itest_func,
+                            nnode + elem.inodes[i],
+                        )] += weights[edge_gp] * phi * dtransformed_flux_dy[i];
                     }
                     /*
                     dx.slice_mut(s![ielem * cell_ngp * cell_ngp + itest_func, ..])

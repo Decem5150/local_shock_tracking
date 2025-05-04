@@ -8,11 +8,13 @@ pub struct BoundaryPatch2d {
     pub boundary_type: BoundaryType,
     pub boundary_quantity: Option<BoundaryQuantity1d>,
 }
+#[derive(Clone)]
 pub struct Edge {
     pub inodes: Vec<usize>,
     pub parents: Vec<usize>,
     pub local_ids: Vec<usize>,
 }
+#[derive(Clone)]
 pub struct Element2d {
     pub inodes: Vec<usize>,
     pub iedges: Vec<usize>,
@@ -29,15 +31,15 @@ pub struct SubMesh2d {
     pub edges: Array<Edge, Ix1>,
     pub elements: Array<Element2d, Ix1>,
 }
+#[derive(Clone)]
 pub struct Mesh2d {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     pub elements: Vec<Element2d>,
     pub internal_edges: Vec<usize>,
     pub boundary_edges: Vec<usize>,
-    // pub internal_elements: Array<usize, Ix1>, // index of internal elements
-    // pub boundary_elements: Array<usize, Ix1>, // index of boundary elements
-    // pub boundary_patches: Array<BoundaryPatch2d, Ix1>,
+    pub free_x: Vec<usize>,
+    pub interior_node_num: usize,
     pub elem_num: usize,
     pub node_num: usize,
 }
@@ -46,8 +48,6 @@ impl Mesh2d {
         basis: &LagrangeBasis1DLobatto,
         enriched_basis: &LagrangeBasis1DLobatto,
     ) -> Mesh2d {
-        let cell_gp_num = basis.cell_gauss_points.len();
-        let enriched_cell_gp_num = enriched_basis.cell_gauss_points.len();
         let nodes = vec![
             Node {
                 x: 0.0,
@@ -137,12 +137,16 @@ impl Mesh2d {
                 ineighbors: vec![0],
             },
         ];
-        let mut mesh = Mesh2d {
+        let free_x = vec![4];
+        let interior_node_num = 0;
+        let mesh = Mesh2d {
             nodes,
             edges,
             elements,
             internal_edges,
             boundary_edges,
+            free_x,
+            interior_node_num,
             elem_num: 2,
             node_num: 6,
         };
