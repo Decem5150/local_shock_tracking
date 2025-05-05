@@ -156,7 +156,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             .assign(&(&obj_dx * -1.0));
         b_ndarray
             .slice_mut(s![num_u + num_x..n_total])
-            .assign(&res.flatten());
+            .assign(&(res.flatten() * -1.0));
 
         let A = A_ndarray.view().into_faer();
         let b = Col::<f64>::from_iter(b_ndarray.view().iter().copied());
@@ -178,10 +178,10 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         let enriched_cell_ngp = unenriched_cell_ngp + 1;
         let epsilon1 = 1e-5;
         let epsilon2 = 1e-10;
-        let max_line_search_iter = 10;
-        let max_sqp_iter = 2;
-        let interior_nnodes: usize = 0;
-        let free_x: [usize; 1] = [4];
+        let max_line_search_iter = 20;
+        let max_sqp_iter = 50;
+        let interior_nnodes = self.mesh.interior_node_num;
+        let free_x = &self.mesh.free_x;
         let mut node_constraints: Array2<f64> =
             Array2::zeros((2 * nnode, 2 * interior_nnodes + free_x.len()));
         node_constraints[(4, 0)] = 1.0;
@@ -213,6 +213,8 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             enriched_dsol.fill(0.0);
             enriched_dx.fill(0.0);
 
+            println!("solutions: {:?}", solutions);
+            println!("node: {:?}", self.mesh.nodes[free_x[0]].x);
             self.compute_residuals_and_derivatives(
                 solutions.view(),
                 residuals.view_mut(),
@@ -221,6 +223,8 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 false,
             );
             println!("residuals: {:?}", residuals);
+            //println!("dsol: {:?}", dsol);
+            //println!("dx: {:?}", dx);
 
             let enriched_solutions = self.interpolate_to_enriched(solutions.view());
             self.compute_residuals_and_derivatives(
@@ -230,14 +234,39 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 enriched_dx.view_mut(),
                 true,
             );
-            println!("enriched_residuals: {:?}", enriched_residuals);
-            println!("enriched_dsol_AD: {:?}", enriched_dsol.slice(s![.., 5]));
+            //println!("enriched_residuals: {:?}", enriched_residuals);
+            //println!("enriched_dsol: {:?}", enriched_dsol.slice(s![.., 5]));
+            //println!("enriched_dx: {:?}", enriched_dx);
 
             let obj_dsol = enriched_dsol.t().dot(&enriched_residuals.flatten());
             let obj_dx = enriched_dx
                 .t()
                 .dot(&enriched_residuals.flatten())
                 .dot(&node_constraints);
+            println!("obj_dsol: {:?}", obj_dsol);
+            println!("obj_dx: {:?}", obj_dx);
+            let dsol_faer = dsol.view().into_faer();
+            let dsol_inv = dsol_faer.partial_piv_lu().inverse();
+            let dsol_inv_t = dsol_inv.transpose().into_ndarray();
+            let obj_dsol_t = obj_dsol.t();
+            let lambda_hat = dsol_inv_t.dot(&obj_dsol_t);
+            let mu = lambda_hat.mapv(f64::abs).max().copied().unwrap() * 2.0;
+            println!("mu: {:?}", mu);
+            // termination criteria
+            let optimality = &obj_dx.t()
+                - &dx
+                    .dot(&node_constraints)
+                    .t()
+                    .dot(&dsol_inv_t)
+                    .dot(&obj_dsol.t());
+            let optimality_norm = optimality.mapv(|x| x.powi(2)).sum().sqrt();
+            let feasibility_norm = residuals.mapv(|x| x.powi(2)).sum().sqrt();
+            println!("optimality: {:?}", optimality_norm);
+            println!("feasibility: {:?}", feasibility_norm);
+            if optimality_norm < epsilon1 && feasibility_norm < epsilon2 {
+                println!("Terminating SQP at iter: {:?}", iter);
+                break;
+            }
 
             let hessian_uu = enriched_dsol.t().dot(&enriched_dsol);
             println!("hessian_uu: {:?}", hessian_uu);
@@ -262,14 +291,11 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 obj_dsol.view(),
                 obj_dx.view(),
             );
+            println!("delta_u: {:?}", delta_u);
+            println!("delta_x: {:?}", delta_x);
 
             // backtracking line search
-            let dsol_inv = dsol.view().into_faer().full_piv_lu().inverse();
-            let dsol_inv_t = dsol_inv.transpose().into_ndarray();
-            let obj_dsol_t = obj_dsol.t();
-            let lambda_hat = dsol_inv_t.dot(&obj_dsol_t);
-            let mu = lambda_hat.mapv(f64::abs).max().copied().unwrap() * 2.0;
-            let mut merit_func = |alpha: f64| -> f64 {
+            let merit_func = |alpha: f64| -> f64 {
                 let mut tmp_mesh = self.mesh.clone();
                 let delta_u_ndarray = Array::from_iter(delta_u.iter().copied());
                 let u_flat = &solutions.flatten() + alpha * &delta_u_ndarray;
@@ -291,12 +317,16 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             let merit_func_0 = merit_func(0.0);
             let dir_deriv =
                 obj_dsol.dot(&delta_u) + obj_dx.dot(&delta_x) - mu * residuals.mapv(f64::abs).sum();
+            println!("dir_deriv: {:?}", dir_deriv);
             let c: f64 = 1e-4;
             let tau: f64 = 0.5;
             let mut n: i32 = 1;
             let mut alpha: f64 = tau.powi(n - 1);
             let mut line_search_iter: usize = 0;
             while line_search_iter < max_line_search_iter {
+                println!("merit_func(alpha): {:?}", merit_func(alpha));
+                println!("merit_func_0: {:?}", merit_func_0);
+                println!("c * alpha * dir_deriv: {:?}", c * alpha * dir_deriv);
                 if merit_func(alpha) <= merit_func_0 + c * alpha * dir_deriv {
                     break;
                 }
@@ -304,34 +334,17 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 n += 1;
                 line_search_iter += 1;
             }
+            println!("alpha: {:?}", alpha);
             if line_search_iter == max_line_search_iter {
                 panic!(
                     "Warning: Line search did not converge within {} iterations.",
                     max_line_search_iter
                 );
             }
-            solutions.scaled_add(alpha, &delta_u.to_shape(solutions.shape()).unwrap());
-            self.mesh
-                .nodes
-                .iter_mut()
-                .enumerate()
-                .for_each(|(i, node)| {
-                    node.x += alpha * delta_x[i];
-                });
 
-            // termination criteria
-            let optimality = &obj_dx.t()
-                - &dx
-                    .dot(&node_constraints)
-                    .t()
-                    .dot(&dsol_inv_t)
-                    .dot(&obj_dsol.t());
-            residuals.fill(0.0);
-            self.compute_residuals(self.mesh, solutions.view(), residuals.view_mut(), false);
-            if optimality.mapv(f64::abs).sum() < epsilon1
-                && residuals.mapv(f64::abs).sum() < epsilon2
-            {
-                break;
+            solutions.scaled_add(alpha, &delta_u.to_shape(solutions.shape()).unwrap());
+            for (i, &ix) in free_x.iter().enumerate() {
+                self.mesh.nodes[ix].x += alpha * delta_x[i];
             }
             iter += 1;
         }
@@ -878,6 +891,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                         dleft_scaling_dy[2] * num_flux + left_scaling * dflux_dleft_y[2],
                         dleft_scaling_dy[3] * num_flux + left_scaling * dflux_dleft_y[3],
                     ];
+
                     let dright_transformed_flux_dul = -right_scaling * dflux_dul;
                     let dright_transformed_flux_dur = -right_scaling * dflux_dur;
 
@@ -1490,7 +1504,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
     pub fn initialize_solution(&mut self, mut solutions: ArrayViewMut2<f64>) {
         let cell_ngp = self.solver_param.cell_gp_num;
         for igp in 0..cell_ngp * cell_ngp {
-            solutions[[0, igp]] = 2.0;
+            solutions[[0, igp]] = 2.1;
             solutions[[1, igp]] = 0.0;
         }
     }
