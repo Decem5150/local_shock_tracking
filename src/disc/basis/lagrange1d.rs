@@ -15,8 +15,8 @@ pub struct LagrangeBasis1D {
 pub struct LagrangeBasis1DLobatto {
     pub cell_gauss_points: Vec<f64>,
     pub cell_gauss_weights: Vec<f64>,
-    pub phis_cell_gps: Array<f64, Ix2>,  // (ngp, nbasis)
-    pub dphis_cell_gps: Array<f64, Ix2>, // (ngp, nbasis)
+    pub phis_cell_gps: Array<f64, Ix2>,  // (nbasis, ngp)
+    pub dphis_cell_gps: Array<f64, Ix2>, // (nbasis, ngp)
 }
 
 impl LagrangeBasis1D {
@@ -154,14 +154,9 @@ impl LagrangeBasis1DLobatto {
         }
     }
 
-    /// Evaluates the i-th basis function at point x
-    ///
     /// # Arguments
     /// * `i` - Index of the basis function to evaluate
     /// * `x` - Point at which to evaluate the basis function
-    ///
-    /// # Returns
-    /// Value of the i-th basis function at point x
     pub fn evaluate_basis_at(&self, i: usize, x: f64) -> f64 {
         let n = self.cell_gauss_points.len();
 
@@ -187,13 +182,6 @@ impl LagrangeBasis1DLobatto {
         result
     }
 
-    /// Evaluates all basis functions at a given point
-    ///
-    /// # Arguments
-    /// * `x` - Point at which to evaluate the basis functions
-    ///
-    /// # Returns
-    /// Vector containing values of all basis functions at point x
     pub fn evaluate_all_basis_at(&self, x: f64) -> Vec<f64> {
         let n = self.cell_gauss_points.len();
         let mut values = vec![0.0; n];
@@ -228,4 +216,46 @@ impl LagrangeBasis1DLobatto {
 
         result
     }
+}
+struct TriangleBasis {
+    pub cell_gauss_points: Vec<f64>,
+    pub cell_gauss_weights: Vec<f64>,
+    pub phis_cell_gps: Array<f64, Ix2>,  // (nbasis, ngp)
+    pub dphis_cell_gps: Array<f64, Ix2>, // (nbasis, ngp)
+}
+fn rs_to_ab(r: f64, s: f64) -> (f64, f64) {
+    let a = {
+        if s != 1.0 {
+            2.0 * (1.0 + r) / (1.0 - s) - 1.0
+        } else {
+            -1.0
+        }
+    };
+    let b = s;
+    (a, b)
+}
+fn jacobi_polynomial(x: f64, alpha: f64, beta: f64, n: i32) -> f64 {
+    match n {
+        0 => 1.0,
+        1 => (alpha + 1.0) + (alpha + beta + 2.0) * (x - 1.0) / 2.0,
+        _ => {
+            let n = n as f64;
+            let a1 = 2.0 * n * (n + alpha + beta) * (2.0 * n + alpha + beta - 2.0);
+            let a2 = 2.0 * n + alpha + beta - 1.0;
+            let a3 = (2.0 * n + alpha + beta) * (2.0 * n + alpha + beta - 2.0) * x + alpha.powi(2)
+                - beta.powi(2);
+            let a4 = 2.0 * (n + alpha - 1.0) * (n + beta - 1.0) * (2.0 * n + alpha + beta);
+
+            let n = n as i32;
+            let pn_1 = jacobi_polynomial(x, alpha, beta, n - 1);
+            let pn_2 = jacobi_polynomial(x, alpha, beta, n - 2);
+
+            (a2 * a3 * pn_1 - a4 * pn_2) / a1
+        }
+    }
+}
+fn dubiner_basis(a: f64, b: f64, i: i32, j: i32) -> f64 {
+    2.0_f64.sqrt()
+        * jacobi_polynomial(a, 0.0, 0.0, i)
+        * jacobi_polynomial(b, 2.0 * i as f64 + 1.0, 0.0, j)
 }

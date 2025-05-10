@@ -179,7 +179,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         let epsilon1 = 1e-5;
         let epsilon2 = 1e-10;
         let max_line_search_iter = 20;
-        let max_sqp_iter = 50;
+        let max_sqp_iter = 100;
         let interior_nnodes = self.mesh.interior_node_num;
         let free_x = &self.mesh.free_x;
         let mut node_constraints: Array2<f64> =
@@ -205,6 +205,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
 
         let mut iter: usize = 0;
         while iter < max_sqp_iter {
+            println!("iter: {:?}", iter);
             // reset residuals, dsol, dx, enriched_residuals, enriched_dsol, enriched_dx
             residuals.fill(0.0);
             dsol.fill(0.0);
@@ -278,7 +279,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 .dot(&enriched_dx.dot(&node_constraints));
             println!("hessian_xx: {:?}", hessian_xx);
             // add an identity matrix to hessian_xx
-            hessian_xx += &(1e-3 * &Array2::eye(2 * interior_nnodes + free_x.len()));
+            hessian_xx += &(1e-8 * &Array2::eye(2 * interior_nnodes + free_x.len()));
 
             let (delta_u, delta_x) = self.solve_linear_subproblem(
                 node_constraints.view(),
@@ -324,9 +325,6 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             let mut alpha: f64 = tau.powi(n - 1);
             let mut line_search_iter: usize = 0;
             while line_search_iter < max_line_search_iter {
-                println!("merit_func(alpha): {:?}", merit_func(alpha));
-                println!("merit_func_0: {:?}", merit_func_0);
-                println!("c * alpha * dir_deriv: {:?}", c * alpha * dir_deriv);
                 if merit_func(alpha) <= merit_func_0 + c * alpha * dir_deriv {
                     break;
                 }
@@ -1504,7 +1502,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
     pub fn initialize_solution(&mut self, mut solutions: ArrayViewMut2<f64>) {
         let cell_ngp = self.solver_param.cell_gp_num;
         for igp in 0..cell_ngp * cell_ngp {
-            solutions[[0, igp]] = 2.1;
+            solutions[[0, igp]] = 2.0;
             solutions[[1, igp]] = 0.0;
         }
     }
