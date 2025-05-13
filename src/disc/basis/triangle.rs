@@ -184,3 +184,18 @@ fn xy_to_rs(x: Array1<f64>, y: Array1<f64>) -> (Array1<f64>, Array1<f64>) {
     let s = -&l2 - &l3 + &l1;
     (r, s)
 }
+fn vandermonde2d(n: usize, r: Array1<f64>, s: Array1<f64>) -> Array2<f64> {
+    let mut v = Array2::<f64>::zeros((r.len(), (n + 1) * (n + 2) / 2));
+    let mut sk: usize = 1;
+    for i in 0..n + 1 {
+        for j in 0..n + 1 - i {
+            for k in 0..r.len() {
+                let (a, b) = rs_to_ab(r[k], s[k]);
+                v[(k, sk)] = dubiner_basis(a, b, i as i32, j as i32);
+            }
+            sk += 1;
+        }
+    }
+    v
+}
+fn compute_nodal_basis(v: Array2<f64>) -> Array2<f64> {}
