@@ -1,6 +1,6 @@
 use std::f64::consts::PI;
 
-use ndarray::{Array, Array1, Array2, Ix1, Ix2, array, s};
+use ndarray::{Array, Array1, Array2, Ix2, array, s};
 use ndarray_linalg::{Eigh, Solve, UPLO};
 use statrs::function::gamma::gamma;
 struct TriangleBasis {
@@ -9,15 +9,19 @@ struct TriangleBasis {
     pub phis_cell_gps: Array<f64, Ix2>,  // (nbasis, ngp)
     pub dphis_cell_gps: Array<f64, Ix2>, // (nbasis, ngp)
 }
-fn rs_to_ab(r: f64, s: f64) -> (f64, f64) {
-    let a = {
-        if s != 1.0 {
-            2.0 * (1.0 + r) / (1.0 - s) - 1.0
-        } else {
-            -1.0
-        }
-    };
-    let b = s;
+fn rs_to_ab(r: Array1<f64>, s: Array1<f64>) -> (Array1<f64>, Array1<f64>) {
+    let a = r
+        .iter()
+        .zip(s.iter())
+        .map(|(&r_val, &s_val)| {
+            if s_val != 1.0 {
+                2.0 * (1.0 + r_val) / (1.0 - s_val) - 1.0
+            } else {
+                -1.0
+            }
+        })
+        .collect::<Array1<f64>>();
+    let b = s.clone();
     (a, b)
 }
 fn jacobi_gauss_quadrature(alpha: f64, beta: f64, n: usize) -> (Array1<f64>, Array1<f64>) {
@@ -83,21 +87,30 @@ fn jacobi_gauss_lobatto(alpha: f64, beta: f64, n: usize) -> Array1<f64> {
 fn jacobi_polynomial(x: Array1<f64>, alpha: f64, beta: f64, n: i32) -> Array1<f64> {
     match n {
         0 => {
-            let p0 = (2.0_f64.powf(- alpha - beta - 1.0) * gamma(alpha + beta + 2.0) / (gamma(alpha + 1.0) * gamma (beta + 1.0))).sqrt();
+            let p0 = (2.0_f64.powf(-alpha - beta - 1.0) * gamma(alpha + beta + 2.0)
+                / (gamma(alpha + 1.0) * gamma(beta + 1.0)))
+            .sqrt();
             Array1::from_elem(x.len(), p0)
         }
-        1 => 0.5 * jacobi_polynomial(x.clone(), alpha, beta, 0) * ((alpha + beta + 2.0) * &x + (alpha - beta)) * ((alpha + beta + 3.0) / ((alpha + 1.0) * (beta + 1.0))).sqrt(),
+        1 => {
+            0.5 * jacobi_polynomial(x.clone(), alpha, beta, 0)
+                * ((alpha + beta + 2.0) * &x + (alpha - beta))
+                * ((alpha + beta + 3.0) / ((alpha + 1.0) * (beta + 1.0))).sqrt()
+        }
         _ => {
             let n = n as f64;
-            let aold = 2.0 / (2.0 + alpha + beta) * ((alpha + 1.0) * (beta + 1.0) / (alpha + beta + 3.0)).sqrt();
+            let aold = 2.0 / (2.0 + alpha + beta)
+                * ((alpha + 1.0) * (beta + 1.0) / (alpha + beta + 3.0)).sqrt();
             let h1 = 2.0 * (n - 1.0) + alpha + beta;
-            let anew = 2.0 / (h1 + 2.0) * (n * (n + alpha + beta) * (n + alpha) * (n + beta) / (h1 + 1.0) / (h1 + 3.0)).sqrt();
-            let bnew = - (alpha.powi(2) - beta.powi(2)) / h1 / (h1 + 2.0);
+            let anew = 2.0 / (h1 + 2.0)
+                * (n * (n + alpha + beta) * (n + alpha) * (n + beta) / (h1 + 1.0) / (h1 + 3.0))
+                    .sqrt();
+            let bnew = -(alpha.powi(2) - beta.powi(2)) / h1 / (h1 + 2.0);
             let n = n as i32;
             let pn_1 = jacobi_polynomial(x.clone(), alpha, beta, n - 1);
             let pn_2 = jacobi_polynomial(x.clone(), alpha, beta, n - 2);
 
-            (- aold * pn_2 + (&x - bnew) * pn_1) / anew
+            (-aold * pn_2 + (&x - bnew) * pn_1) / anew
         }
     }
 }
@@ -123,7 +136,8 @@ fn dubiner_basis(a: Array1<f64>, b: Array1<f64>, i: i32, j: i32) -> Array1<f64> 
 fn vandermonde_matrix(n: usize, r: Array1<f64>) -> Array2<f64> {
     let mut v = Array2::<f64>::zeros((r.len(), n + 1));
     for j in 0..=n {
-        v.column_mut(j).assign(&jacobi_polynomial(r.clone(), 0.0, 0.0, j as i32));
+        v.column_mut(j)
+            .assign(&jacobi_polynomial(r.clone(), 0.0, 0.0, j as i32));
     }
     v
 }
@@ -134,7 +148,8 @@ fn warp_factor(n: usize, r: Array1<f64>) -> Array1<f64> {
     let nr = r.len();
     let mut pmat = Array2::<f64>::zeros((n + 1, nr));
     for i in 0..n + 1 {
-        pmat.row_mut(i).assign(&jacobi_polynomial(r.clone(), 0.0, 0.0, i as i32));
+        pmat.row_mut(i)
+            .assign(&jacobi_polynomial(r.clone(), 0.0, 0.0, i as i32));
     }
     let mut lmat = Array2::zeros((veq.shape()[1], pmat.shape()[1]));
     for i in 0..pmat.shape()[1] {
@@ -197,19 +212,51 @@ fn xy_to_rs(x: Array1<f64>, y: Array1<f64>) -> (Array1<f64>, Array1<f64>) {
 }
 fn vandermonde2d(n: usize, r: Array1<f64>, s: Array1<f64>) -> Array2<f64> {
     let mut v = Array2::<f64>::zeros((r.len(), (n + 1) * (n + 2) / 2));
+    let (a, b) = rs_to_ab(r, s);
     let mut sk: usize = 1;
     for i in 0..n + 1 {
         for j in 0..n + 1 - i {
-            for k in 0..r.len() {
-                let (a, b) = rs_to_ab(r[k], s[k]);
-                v[(k, sk)] = dubiner_basis(a, b, i as i32, j as i32);
-            }
+            v.column_mut(sk)
+                .assign(&dubiner_basis(a.clone(), b.clone(), i as i32, j as i32));
             sk += 1;
         }
     }
     v
 }
-fn grad_simplex_2d(a: f64, b: f64, id: i32, jd: i32) -> (Array2<f64>, Array2<f64>) {
-    let fa = jacobi_polynomial(a, 0.0, 0.0, id);
-    let 
+fn grad_simplex_2d(a: Array1<f64>, b: Array1<f64>, id: i32, jd: i32) -> (Array1<f64>, Array1<f64>) {
+    let fa = jacobi_polynomial(a.clone(), 0.0, 0.0, id);
+    let gb = jacobi_polynomial(b.clone(), 2.0 * id as f64 + 1.0, 0.0, jd);
+    let dfa = grad_jacobi_polynomial(a.clone(), 0.0, 0.0, id);
+    let dgb = grad_jacobi_polynomial(b.clone(), 2.0 * id as f64 + 1.0, 0.0, jd);
+    let mut dmode_dr = &dfa * &gb;
+    if id > 0 {
+        dmode_dr = (0.5 * (1.0 - &b)).powi(id - 1) * &dmode_dr;
+    }
+    let mut dmode_ds = &dfa * (&gb * (0.5 * (1.0 + &a)));
+    if id > 0 {
+        dmode_ds = (0.5 * (1.0 + &a)).powi(id - 1) * &dmode_ds;
+    }
+    let mut tmp = &dgb * ((0.5 * (1.0 - &b)).powi(id));
+    if id > 0 {
+        tmp = tmp - 0.5 * id as f64 * &gb * ((0.5 * (1.0 - &b)).powi(id - 1));
+    }
+    dmode_ds = dmode_ds + &fa * &tmp;
+    dmode_dr = dmode_dr * 2.0_f64.powf(id as f64 + 0.5);
+    dmode_ds = dmode_ds * 2.0_f64.powf(id as f64 + 0.5);
+    (dmode_dr, dmode_ds)
+}
+fn grad_vandermonde_2d(n: usize, r: Array1<f64>, s: Array1<f64>) -> (Array2<f64>, Array2<f64>) {
+    let mut v2dr = Array2::<f64>::zeros((r.len(), (n + 1) * (n + 2) / 2));
+    let mut v2ds = Array2::<f64>::zeros((r.len(), (n + 1) * (n + 2) / 2));
+    let (a, b) = rs_to_ab(r, s);
+    let mut sk: usize = 1;
+    for i in 0..n + 1 {
+        for j in 0..n + 1 - i {
+            let (v2dr_row, v2ds_row) = grad_simplex_2d(a.clone(), b.clone(), i as i32, j as i32);
+            v2dr.row_mut(sk).assign(&v2dr_row);
+            v2ds.row_mut(sk).assign(&v2ds_row);
+            sk += 1;
+        }
+    }
+    (v2dr, v2ds)
 }
