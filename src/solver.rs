@@ -1,8 +1,11 @@
 use crate::disc::{
-    advection1d_space_time::Disc1dAdvectionSpaceTime,
-    basis::lagrange1d::LagrangeBasis1DLobatto,
-    // burgers1d::Disc1dBurgers,
-    mesh::{mesh1d::Mesh1d, mesh2d::Mesh2d},
+    advection1d_space_time_quad::Disc1dAdvectionSpaceTimeQuad,
+    advection1d_space_time_tri::Disc1dAdvectionSpaceTimeTri,
+    basis::{lagrange1d::LagrangeBasis1DLobatto, triangle::TriangleBasis},
+    mesh::{
+        mesh1d::Mesh1d,
+        mesh2d::{Mesh2d, QuadrilateralElement, TriangleElement},
+    },
 };
 use ndarray::{Array, Array3, Ix2, Ix3};
 
@@ -22,34 +25,57 @@ pub struct ShockTrackingParameters {
 pub struct FlowParameters {
     pub hcr: f64,
 }
-pub struct ShockTrackingSolver<'a> {
+pub struct ShockTrackingSolverQuad<'a> {
     pub solutions: Array<f64, Ix2>,
-    pub disc: Disc1dAdvectionSpaceTime<'a>,
+    pub disc: Disc1dAdvectionSpaceTimeQuad<'a>,
     // pub mesh: &'a Mesh2d,
     pub solver_params: &'a SolverParameters,
 }
-impl<'a> ShockTrackingSolver<'a> {
+impl<'a> ShockTrackingSolverQuad<'a> {
     pub fn new(
         basis: LagrangeBasis1DLobatto,
         enriched_basis: LagrangeBasis1DLobatto,
-        mesh: &'a mut Mesh2d,
+        mesh: &'a mut Mesh2d<QuadrilateralElement>,
         solver_params: &'a SolverParameters,
     ) -> Self {
         let solutions = Array::zeros((
             mesh.elem_num,
             solver_params.cell_gp_num * solver_params.cell_gp_num,
         ));
-        let disc = Disc1dAdvectionSpaceTime::new(basis, enriched_basis, mesh, solver_params);
+        let disc = Disc1dAdvectionSpaceTimeQuad::new(basis, enriched_basis, mesh, solver_params);
         Self {
             solutions,
             disc,
-            // mesh,
             solver_params,
         }
     }
     pub fn solve(&mut self) {
         self.disc.initialize_solution(self.solutions.view_mut());
         self.disc.solve(self.solutions.view_mut());
+    }
+}
+pub struct ShockTrackingSolverTri<'a> {
+    pub solutions: Array<f64, Ix2>,
+    pub disc: Disc1dAdvectionSpaceTimeTri<'a>,
+    pub solver_params: &'a SolverParameters,
+}
+impl<'a> ShockTrackingSolverTri<'a> {
+    pub fn new(
+        basis: TriangleBasis,
+        enriched_basis: TriangleBasis,
+        mesh: &'a mut Mesh2d<TriangleElement>,
+        solver_params: &'a SolverParameters,
+    ) -> Self {
+        let solutions = Array::zeros((
+            mesh.elem_num,
+            solver_params.cell_gp_num * solver_params.cell_gp_num,
+        ));
+        let disc = Disc1dAdvectionSpaceTimeTri::new(basis, enriched_basis, mesh, solver_params);
+        Self {
+            solutions,
+            disc,
+            solver_params,
+        }
     }
 }
 /*

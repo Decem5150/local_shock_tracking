@@ -4,7 +4,8 @@ pub mod basis;
 pub mod gauss_points;
 pub mod mesh;
 // pub mod riemann_solver;
-pub mod advection1d_space_time;
+pub mod advection1d_space_time_quad;
+pub mod advection1d_space_time_tri;
 // pub mod burgers1d;
 // pub mod euler1d;
 

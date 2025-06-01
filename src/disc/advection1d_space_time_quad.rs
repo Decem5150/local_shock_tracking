@@ -1,18 +1,18 @@
-pub mod boundary_condition;
 mod flux;
-mod riemann_solver;
-mod shock_tracking;
+
 use faer::{Col, Mat, linalg::solvers::DenseSolveCore, mat, prelude::Solve};
 use faer_ext::{IntoFaer, IntoNdarray};
 use flux::space_time_flux1d;
 use ndarray::{Array, Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, array, s};
 use ndarray_stats::QuantileExt;
-use riemann_solver::smoothed_upwind;
-use std::autodiff::autodiff;
+use std::autodiff::autodiff_reverse;
 
+use super::{
+    basis::lagrange1d::LagrangeBasis1DLobatto,
+    mesh::mesh2d::{Mesh2d, QuadrilateralElement},
+};
 use crate::solver::SolverParameters;
 
-use super::{basis::lagrange1d::LagrangeBasis1DLobatto, mesh::mesh2d::Mesh2d};
 fn compute_normal(x0: f64, y0: f64, x1: f64, y1: f64) -> [f64; 2] {
     [y1 - y0, x0 - x1]
 }
@@ -48,47 +48,25 @@ fn evaluate_jacob(eta: f64, xi: f64, x: &[f64], y: &[f64]) -> (f64, [f64; 4]) {
     ];
     (jacob_det, jacob_inv_t)
 }
-struct Sqp {
-    c: f64,
-    tau: f64,
-    epsilon1: f64,
-    epsilon2: f64,
-    max_line_search_iter: usize,
-    max_sqp_iter: usize,
-}
-impl Sqp {
-    fn new(mesh: &Mesh2d) -> Self {
-        Self {
-            c: 1e-4,
-            tau: 0.5,
-            epsilon1: 1e-5,
-            epsilon2: 1e-10,
-            max_line_search_iter: 10,
-            max_sqp_iter: 100,
-        }
-    }
-}
-pub struct Disc1dAdvectionSpaceTime<'a> {
-    pub current_iter: usize,
+pub struct Disc1dAdvectionSpaceTimeQuad<'a> {
     pub basis: LagrangeBasis1DLobatto,
     pub enriched_basis: LagrangeBasis1DLobatto,
     pub interp_matrix: Array2<f64>,
-    pub mesh: &'a mut Mesh2d,
+    pub mesh: &'a mut Mesh2d<QuadrilateralElement>,
     solver_param: &'a SolverParameters,
     advection_speed: f64,
 }
-impl<'a> Disc1dAdvectionSpaceTime<'a> {
+impl<'a> Disc1dAdvectionSpaceTimeQuad<'a> {
     pub fn new(
         basis: LagrangeBasis1DLobatto,
         enriched_basis: LagrangeBasis1DLobatto,
-        mesh: &'a mut Mesh2d,
+        mesh: &'a mut Mesh2d<QuadrilateralElement>,
         solver_param: &'a SolverParameters,
-    ) -> Disc1dAdvectionSpaceTime<'a> {
+    ) -> Disc1dAdvectionSpaceTimeQuad<'a> {
         let interp_matrix = Self::compute_interp_matrix(&basis, &enriched_basis);
         println!("basis: {:?}", basis.cell_gauss_points);
         println!("enriched_basis: {:?}", enriched_basis.cell_gauss_points);
-        Disc1dAdvectionSpaceTime {
-            current_iter: 0,
+        Disc1dAdvectionSpaceTimeQuad {
             basis,
             enriched_basis,
             interp_matrix,
@@ -390,7 +368,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
 
     fn compute_residuals(
         &self,
-        mesh: &Mesh2d,
+        mesh: &Mesh2d<QuadrilateralElement>,
         solutions: ArrayView2<f64>,
         mut residuals: ArrayViewMut2<f64>,
         is_enriched: bool,
@@ -631,7 +609,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         let weights = &basis.cell_gauss_weights;
         for ielem in 0..nelem {
             let elem = &self.mesh.elements[ielem];
-            let inodes = &self.mesh.elements[ielem].inodes;
+            let inodes = &elem.inodes;
             let mut x_slice = [0.0; 4];
             let mut y_slice = [0.0; 4];
             for i in 0..4 {
@@ -672,11 +650,8 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                     .scaled_add(1.0, &dvol_sol);
                 }
                 for i in 0..4 {
-                    dx[(ielem * cell_ngp * cell_ngp + itest_func, elem.inodes[i])] += dvol_x[i];
-                    dx[(
-                        ielem * cell_ngp * cell_ngp + itest_func,
-                        nnode + elem.inodes[i],
-                    )] += dvol_y[i];
+                    dx[(ielem * cell_ngp * cell_ngp + itest_func, inodes[i])] += dvol_x[i];
+                    dx[(ielem * cell_ngp * cell_ngp + itest_func, nnode + inodes[i])] += dvol_y[i];
                 }
                 /*
                 let res = self.volume_integral(
@@ -1077,7 +1052,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
             let edge = &self.mesh.edges[iedge];
             let ielem = edge.parents[0];
             let elem = &self.mesh.elements[ielem];
-            let inodes = &self.mesh.elements[ielem].inodes;
+            let inodes = &elem.inodes;
             let mut x_slice = [0.0; 4];
             let mut y_slice = [0.0; 4];
             for i in 0..4 {
@@ -1167,12 +1142,10 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                         )] += weights[edge_gp] * dtransformed_flux_du * phi;
                     }
                     for i in 0..4 {
-                        dx[(ielem * cell_ngp * cell_ngp + itest_func, elem.inodes[i])] +=
+                        dx[(ielem * cell_ngp * cell_ngp + itest_func, inodes[i])] +=
                             weights[edge_gp] * phi * dtransformed_flux_dx[i];
-                        dx[(
-                            ielem * cell_ngp * cell_ngp + itest_func,
-                            nnode + elem.inodes[i],
-                        )] += weights[edge_gp] * phi * dtransformed_flux_dy[i];
+                        dx[(ielem * cell_ngp * cell_ngp + itest_func, nnode + inodes[i])] +=
+                            weights[edge_gp] * phi * dtransformed_flux_dy[i];
                     }
                     /*
                     dx.slice_mut(s![ielem * cell_ngp * cell_ngp + itest_func, ..])
@@ -1185,8 +1158,8 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         }
     }
 
-    #[autodiff(
-        dvolume, Reverse, Const, Const, Const, Const, Duplicated, Duplicated, Duplicated, Active
+    #[autodiff_reverse(
+        dvolume, Const, Const, Const, Const, Duplicated, Duplicated, Duplicated, Active
     )]
     fn volume_integral(
         &self,
@@ -1236,8 +1209,8 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         res
     }
 
-    #[autodiff(
-        dnum_flux, Reverse, Const, Const, Active, Active, Active, Active, Active, Active, Active
+    #[autodiff_reverse(
+        dnum_flux, Const, Const, Active, Active, Active, Active, Active, Active, Active
     )]
     fn compute_numerical_flux(
         &self,
@@ -1257,9 +1230,7 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
                 + (beta_dot_normal * (100.0 * beta_dot_normal).tanh()) * (ul - ur));
         result
     }
-    #[autodiff(
-        dscaling, Reverse, Const, Const, Const, Const, Duplicated, Duplicated, Active
-    )]
+    #[autodiff_reverse(dscaling, Const, Const, Const, Const, Duplicated, Duplicated, Active)]
     fn compute_flux_scaling(
         &self,
         eta: f64,
@@ -1278,226 +1249,6 @@ impl<'a> Disc1dAdvectionSpaceTime<'a> {
         let normal_magnitude =
             (transformed_normal[0].powi(2) + transformed_normal[1].powi(2)).sqrt();
         jacob_det * normal_magnitude
-    }
-    fn compute_surface_flux(
-        &self,
-        left_eta: f64,
-        left_xi: f64,
-        right_eta: f64,
-        right_xi: f64,
-        left_ref_normal: [f64; 2],
-        right_ref_normal: [f64; 2],
-        left_ids: [usize; 4],  // ids in grouped nodes
-        right_ids: [usize; 4], // ids in grouped nodes
-        left_value: &f64,
-        right_value: &f64,
-        x: &[f64],
-        y: &[f64],
-        left_transformed_flux: &mut f64,
-        right_transformed_flux: &mut f64,
-    ) {
-        let left_x = [
-            x[left_ids[0]],
-            x[left_ids[1]],
-            x[left_ids[2]],
-            x[left_ids[3]],
-        ];
-        let left_y = [
-            y[left_ids[0]],
-            y[left_ids[1]],
-            y[left_ids[2]],
-            y[left_ids[3]],
-        ];
-        let right_x = [
-            x[right_ids[0]],
-            x[right_ids[1]],
-            x[right_ids[2]],
-            x[right_ids[3]],
-        ];
-        let right_y = [
-            y[right_ids[0]],
-            y[right_ids[1]],
-            y[right_ids[2]],
-            y[right_ids[3]],
-        ];
-        let normal = compute_normal(x[4], y[4], x[5], y[5]);
-        let num_flux = smoothed_upwind(*left_value, *right_value, normal, self.advection_speed);
-        let (left_jacob_det, left_jacob_inv_t) =
-            evaluate_jacob(left_eta, left_xi, left_x.as_slice(), left_y.as_slice());
-        let (right_jacob_det, right_jacob_inv_t) =
-            evaluate_jacob(right_eta, right_xi, right_x.as_slice(), right_y.as_slice());
-        let left_transformed_normal = {
-            [
-                left_jacob_inv_t[0] * left_ref_normal[0] + left_jacob_inv_t[1] * left_ref_normal[1],
-                left_jacob_inv_t[2] * left_ref_normal[0] + left_jacob_inv_t[3] * left_ref_normal[1],
-            ]
-        };
-        let right_transformed_normal = {
-            [
-                right_jacob_inv_t[0] * right_ref_normal[0]
-                    + right_jacob_inv_t[1] * right_ref_normal[1],
-                right_jacob_inv_t[2] * right_ref_normal[0]
-                    + right_jacob_inv_t[3] * right_ref_normal[1],
-            ]
-        };
-        let left_normal_magnitude =
-            (left_transformed_normal[0].powi(2) + left_transformed_normal[1].powi(2)).sqrt();
-        let left_scaling = left_jacob_det * left_normal_magnitude;
-        *left_transformed_flux = left_scaling * num_flux;
-        let right_normal_magnitude =
-            (right_transformed_normal[0].powi(2) + right_transformed_normal[1].powi(2)).sqrt();
-        let right_scaling = right_jacob_det * right_normal_magnitude;
-        *right_transformed_flux = right_scaling * (-num_flux);
-        // (left_transformed_flux, right_transformed_flux)
-    }
-    fn surface_integral(
-        &self,
-        itest_func_eta: usize,
-        itest_func_xi: usize,
-        left_sol: ArrayView1<f64>,
-        right_sol: ArrayView1<f64>,
-        x: [f64; 6],
-        y: [f64; 6],
-        left_res: &mut f64,
-        right_res: &mut f64,
-    ) {
-        let cell_ngp = self.solver_param.cell_gp_num;
-        let weights = &self.basis.cell_gauss_weights;
-        for edge_gp in 0..cell_ngp {
-            // Map quadrature points based on edge orientation
-            let left_kgp = edge_gp;
-            let left_igp = cell_ngp - 1;
-            let right_kgp = edge_gp;
-            let right_igp = 0;
-            let left_eta = self.basis.cell_gauss_points[left_kgp];
-            let left_xi = self.basis.cell_gauss_points[left_igp];
-            let right_eta = self.basis.cell_gauss_points[right_kgp];
-            let right_xi = self.basis.cell_gauss_points[right_igp];
-            let left_value = left_sol[left_igp + left_kgp * cell_ngp];
-            let right_value = right_sol[right_igp + right_kgp * cell_ngp];
-            let left_x = [x[0], x[4], x[5], x[1]];
-            let left_y = [y[0], y[4], y[5], y[1]];
-            let right_x = [x[4], x[2], x[3], x[5]];
-            let right_y = [y[4], y[2], y[3], y[5]];
-            let normal = compute_normal(x[4], y[4], x[5], y[5]);
-
-            let num_flux = smoothed_upwind(left_value, right_value, normal, self.advection_speed);
-
-            let (left_jacob_det, left_jacob_inv_t) =
-                evaluate_jacob(left_eta, left_xi, left_x.as_slice(), left_y.as_slice());
-            let left_n_ref = [1.0, 0.0];
-            let left_transformed_normal = {
-                [
-                    left_jacob_inv_t[0] * left_n_ref[0] + left_jacob_inv_t[1] * left_n_ref[1],
-                    left_jacob_inv_t[2] * left_n_ref[0] + left_jacob_inv_t[3] * left_n_ref[1],
-                ]
-            };
-            let left_normal_magnitude =
-                (left_transformed_normal[0].powi(2) + left_transformed_normal[1].powi(2)).sqrt();
-            let left_scaling = left_jacob_det * left_normal_magnitude;
-            let left_transformed_flux = left_scaling * num_flux;
-
-            let (right_jacob_det, right_jacob_inv_t) =
-                evaluate_jacob(right_eta, right_xi, right_x.as_slice(), right_y.as_slice());
-            let right_n_ref = [-1.0, 0.0];
-            let right_transformed_normal = {
-                [
-                    right_jacob_inv_t[0] * right_n_ref[0] + right_jacob_inv_t[1] * right_n_ref[1],
-                    right_jacob_inv_t[2] * right_n_ref[0] + right_jacob_inv_t[3] * right_n_ref[1],
-                ]
-            };
-            let right_normal_magnitude =
-                (right_transformed_normal[0].powi(2) + right_transformed_normal[1].powi(2)).sqrt();
-            let right_scaling = right_jacob_det * right_normal_magnitude;
-            let right_transformed_flux = right_scaling * (-num_flux);
-            let left_phi = self.basis.phis_cell_gps[[itest_func_xi, left_igp]]
-                * self.basis.phis_cell_gps[[itest_func_eta, left_kgp]];
-            let right_phi = self.basis.phis_cell_gps[[itest_func_xi, right_igp]]
-                * self.basis.phis_cell_gps[[itest_func_eta, right_kgp]];
-            // println!("left_transformed_flux: {:?}", left_transformed_flux);
-            // println!("right_transformed_flux: {:?}", right_transformed_flux);
-            *left_res += weights[left_kgp] * left_transformed_flux * left_phi;
-            *right_res += weights[right_kgp] * right_transformed_flux * right_phi;
-        }
-    }
-
-    fn boundary_condition(
-        &self,
-        iedge: usize,
-        itest_func_eta: usize,
-        itest_func_xi: usize,
-        sol: ArrayView1<f64>,
-        x: [f64; 4],
-        y: [f64; 4],
-        res: &mut f64,
-    ) {
-        let cell_ngp = self.solver_param.cell_gp_num;
-        let weights = &self.basis.cell_gauss_weights;
-        for edge_gp in 0..cell_ngp {
-            let mut kgp: usize = 0;
-            let mut igp: usize = 0;
-            let mut ref_normal = [0.0; 2];
-            let mut flux = 0.0;
-            let mut weight = 0.0;
-
-            // lower boundary
-            if iedge == 0 || iedge == 1 {
-                kgp = 0;
-                igp = edge_gp;
-                let u = { if iedge == 0 { 2.0 } else { 0.0 } };
-                flux = -u;
-                ref_normal = [0.0, -1.0];
-                weight = weights[igp];
-            }
-            // right boundary
-            if iedge == 2 {
-                kgp = edge_gp;
-                igp = cell_ngp - 1;
-                let u = sol[igp + kgp * cell_ngp];
-                flux = self.advection_speed * u;
-                ref_normal = [1.0, 0.0];
-                weight = weights[kgp];
-            }
-            // upper boundary
-            if iedge == 3 || iedge == 4 {
-                kgp = cell_ngp - 1;
-                igp = edge_gp;
-                let u = sol[igp + kgp * cell_ngp];
-                flux = u;
-                ref_normal = [0.0, 1.0];
-                weight = weights[igp];
-            }
-            // left boundary
-            if iedge == 5 {
-                kgp = edge_gp;
-                igp = 0;
-                let u = 2.0;
-                flux = -self.advection_speed * u;
-                ref_normal = [-1.0, 0.0];
-                weight = weights[kgp];
-            }
-
-            //println!("iedge: {}, kgp: {}", iedge, kgp);
-            let (jacob_det, jacob_inv_t) = evaluate_jacob(
-                self.basis.cell_gauss_points[kgp],
-                self.basis.cell_gauss_points[igp],
-                x.as_slice(),
-                y.as_slice(),
-            );
-            let transformed_normal = {
-                [
-                    jacob_inv_t[0] * ref_normal[0] + jacob_inv_t[1] * ref_normal[1],
-                    jacob_inv_t[2] * ref_normal[0] + jacob_inv_t[3] * ref_normal[1],
-                ]
-            };
-            let normal_magnitude =
-                (transformed_normal[0].powi(2) + transformed_normal[1].powi(2)).sqrt();
-            let scaling = jacob_det * normal_magnitude;
-            let transformed_flux = scaling * flux;
-            let phi = self.basis.phis_cell_gps[(itest_func_eta, kgp)]
-                * self.basis.phis_cell_gps[(itest_func_xi, igp)];
-            *res += weight * phi * transformed_flux;
-        }
     }
     pub fn initialize_solution(&mut self, mut solutions: ArrayViewMut2<f64>) {
         let cell_ngp = self.solver_param.cell_gp_num;

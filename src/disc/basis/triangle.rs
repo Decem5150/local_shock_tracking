@@ -8,27 +8,36 @@ pub struct TriangleBasis {
     pub s: Array1<f64>,
     pub l: Array2<f64>,
     pub vandermonde: Array2<f64>,
+    pub inv_vandermonde: Array2<f64>,
     pub dr: Array2<f64>,
     pub ds: Array2<f64>,
     pub nodes_along_edges: Array2<usize>,
+    pub cub_r: Array1<f64>,
+    pub cub_s: Array1<f64>,
+    pub cub_w: Array1<f64>,
 }
 impl TriangleBasis {
     pub fn new(n: usize) -> Self {
         let (x, y) = Self::nodes2d(n);
         let (r, s) = Self::xy_to_rs(x.view(), y.view());
         let vandermonde = Self::vandermonde2d(n, r.view(), s.view());
+        let inv_vandermonde = vandermonde.t().inv().unwrap();
         let l = Self::compute_l(vandermonde.view());
         let (dr, ds) = Self::dmatrices_2d(n, r.view(), s.view(), vandermonde.view());
         let nodes_along_edges = Self::find_nodes_along_edges(n, r.view(), s.view());
-
+        let (cub_r, cub_s, cub_w) = Self::cubature_points(n);
         Self {
             r,
             s,
             l,
             vandermonde,
+            inv_vandermonde,
             dr,
             ds,
             nodes_along_edges,
+            cub_r,
+            cub_s,
+            cub_w,
         }
     }
     fn compute_l(v: ArrayView2<f64>) -> Array2<f64> {
@@ -301,7 +310,7 @@ impl TriangleBasis {
         }
         v
     }
-    fn vandermonde2d(n: usize, r: ArrayView1<f64>, s: ArrayView1<f64>) -> Array2<f64> {
+    pub fn vandermonde2d(n: usize, r: ArrayView1<f64>, s: ArrayView1<f64>) -> Array2<f64> {
         let mut v = Array2::<f64>::zeros((r.len(), (n + 1) * (n + 2) / 2));
         let (a, b) = Self::rs_to_ab(r, s);
         let mut sk: usize = 0;
@@ -427,5 +436,69 @@ impl TriangleBasis {
         }
         let lift = v.t().dot(&(v.dot(&emat)));
         lift
+    }
+    pub fn cubature_points(n: usize) -> (Array1<f64>, Array1<f64>, Array1<f64>) {
+        let (r, s, weight) = match n {
+            2 => {
+                let r = array![0.16666666666667, 0.16666666666667, 0.66666666666667];
+                let s = array![0.16666666666667, 0.66666666666667, 0.16666666666667];
+                let weight = array![0.33333333333333, 0.33333333333333, 0.33333333333333];
+                (r, s, weight)
+            }
+            3 => {
+                let r = array![
+                    0.33333333333333,
+                    0.20000000000000,
+                    0.20000000000000,
+                    0.60000000000000
+                ];
+                let s = array![
+                    0.33333333333333,
+                    0.20000000000000,
+                    0.60000000000000,
+                    0.20000000000000
+                ];
+                let weight = array![
+                    -0.56250000000000,
+                    0.52083333333333,
+                    0.52083333333333,
+                    0.52083333333333
+                ];
+                (r, s, weight)
+            }
+            4 => {
+                let r = array![
+                    0.44594849091597,
+                    0.44594849091597,
+                    0.10810301816807,
+                    0.09157621350977,
+                    0.09157621350977,
+                    0.81684757298046
+                ];
+                let s = array![
+                    0.44594849091597,
+                    0.10810301816807,
+                    0.44594849091597,
+                    0.09157621350977,
+                    0.81684757298046,
+                    0.09157621350977
+                ];
+                let weight = array![
+                    0.22338158967801,
+                    0.22338158967801,
+                    0.22338158967801,
+                    0.10995174365532,
+                    0.10995174365532,
+                    0.10995174365532
+                ];
+                (r, s, weight)
+            }
+            _ => {
+                panic!("Number of points not supported");
+            }
+        };
+        let r_new = 2.0 * &s - 1.0;
+        let s_new = 2.0 * &r - 1.0;
+        (r_new, s_new, weight)
     }
 }

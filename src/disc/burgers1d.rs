@@ -345,7 +345,7 @@ impl<'a> Disc1dBurgers<'a> {
         }
     }
     fn volume_integral(
-        &mut self,
+        &self,
         lqh: ArrayView3<f64>,        // (ntdof, nxdof, neq)
         mut res: ArrayViewMut2<f64>, // (nxdof, neq)
         elem: &Element1d,

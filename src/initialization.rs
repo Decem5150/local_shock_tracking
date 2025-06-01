@@ -2,11 +2,17 @@ use ndarray::Array3;
 
 use crate::{
     disc::{
-        basis::lagrange1d::{LagrangeBasis1D, LagrangeBasis1DLobatto},
-        mesh::{mesh1d::Mesh1d, mesh2d::Mesh2d},
+        basis::{
+            lagrange1d::{LagrangeBasis1D, LagrangeBasis1DLobatto},
+            triangle::TriangleBasis,
+        },
+        mesh::{
+            mesh1d::Mesh1d,
+            mesh2d::{Mesh2d, QuadrilateralElement, TriangleElement},
+        },
     },
     io::params_parser::SolverParamParser,
-    solver::{FlowParameters, ShockTrackingSolver, SolverParameters},
+    solver::{FlowParameters, ShockTrackingSolverQuad, ShockTrackingSolverTri, SolverParameters},
 };
 
 pub fn initialize_params() -> (FlowParameters, SolverParameters) {
@@ -25,7 +31,7 @@ pub fn initialize_params() -> (FlowParameters, SolverParameters) {
     (flow_params, solver_params)
 }
 pub fn initialize_params_advection() -> SolverParameters {
-    let polynomial_order = 2;
+    let polynomial_order = 3;
     let cell_gp_num = polynomial_order + 1;
     let solver_params = SolverParameters {
         cfl: 1.0,
@@ -46,18 +52,24 @@ pub fn initialize_enriched_basis(enriched_cell_gp_num: usize) -> LagrangeBasis1D
 pub fn initialize_mesh1d(node_num: usize, left_coord: f64, right_coord: f64) -> Mesh1d {
     Mesh1d::new(node_num, left_coord, right_coord)
 }
-pub fn initialize_two_element_mesh2d(
-    basis: &LagrangeBasis1DLobatto,
-    enriched_basis: &LagrangeBasis1DLobatto,
-) -> Mesh2d {
-    Mesh2d::create_two_element_mesh(basis, enriched_basis)
+pub fn initialize_two_element_mesh2d() -> Mesh2d<QuadrilateralElement> {
+    Mesh2d::create_two_quad_mesh()
 }
-pub fn initialize_solver<'a>(
-    mesh: &'a mut Mesh2d,
+pub fn initialize_quad_solver<'a>(
+    mesh: &'a mut Mesh2d<QuadrilateralElement>,
     basis: LagrangeBasis1DLobatto,
     enriched_basis: LagrangeBasis1DLobatto,
     solver_param: &'a SolverParameters,
-) -> ShockTrackingSolver<'a> {
-    let solver = ShockTrackingSolver::new(basis, enriched_basis, mesh, solver_param);
+) -> ShockTrackingSolverQuad<'a> {
+    let solver = ShockTrackingSolverQuad::new(basis, enriched_basis, mesh, solver_param);
+    solver
+}
+pub fn initialize_tri_solver<'a>(
+    mesh: &'a mut Mesh2d<TriangleElement>,
+    basis: TriangleBasis,
+    enriched_basis: TriangleBasis,
+    solver_param: &'a SolverParameters,
+) -> ShockTrackingSolverTri<'a> {
+    let solver = ShockTrackingSolverTri::new(basis, enriched_basis, mesh, solver_param);
     solver
 }
