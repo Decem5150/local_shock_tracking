@@ -7,6 +7,34 @@ pub struct Edge {
     pub inodes: Vec<usize>,
     pub parents: Vec<usize>,
     pub local_ids: Vec<usize>,
+    pub ref_normal: [f64; 2],
+}
+impl Edge {
+    pub fn compute_ref_tri_normal(&mut self) {
+        let local_edge_id = self.local_ids[0];
+
+        match local_edge_id {
+            0 => {
+                // Bottom edge: from (0,0) to (1,0)
+                // Outward normal points downward
+                self.ref_normal = [0.0, -1.0];
+            }
+            1 => {
+                // Hypotenuse edge: from (1,0) to (0,1)
+                // Edge vector: (-1, 1), normal: (1, 1) normalized
+                let sqrt2_inv = 1.0 / (2.0_f64.sqrt());
+                self.ref_normal = [sqrt2_inv, sqrt2_inv];
+            }
+            2 => {
+                // Left edge: from (0,1) to (0,0)
+                // Outward normal points leftward
+                self.ref_normal = [-1.0, 0.0];
+            }
+            _ => {
+                panic!("Invalid edge ID");
+            }
+        }
+    }
 }
 pub trait Element2d: std::fmt::Debug {
     fn inodes(&self) -> &[usize];
@@ -166,36 +194,43 @@ impl Mesh2d<QuadrilateralElement> {
                 inodes: vec![0, 1],
                 parents: vec![0],
                 local_ids: vec![0],
+                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![1, 2],
                 parents: vec![1],
                 local_ids: vec![0],
+                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![2, 3],
                 parents: vec![1],
                 local_ids: vec![1],
+                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![3, 4],
                 parents: vec![1],
                 local_ids: vec![2],
+                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![4, 5],
                 parents: vec![0],
                 local_ids: vec![2],
+                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![5, 0],
                 parents: vec![0],
                 local_ids: vec![3],
+                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![1, 4],
                 parents: vec![0, 1],
                 local_ids: vec![1, 3],
+                ref_normal: [0.0, 0.0],
             },
         ];
         let internal_edges = vec![6];
@@ -268,53 +303,65 @@ impl Mesh2d<TriangleElement> {
                 local_ids: vec![1],
             },
         ];
-        let edges = vec![
+        let mut edges = vec![
             Edge {
                 inodes: vec![0, 1],
                 parents: vec![0],
                 local_ids: vec![0],
+                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![1, 2],
                 parents: vec![2],
                 local_ids: vec![0],
+                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![2, 3],
                 parents: vec![2],
                 local_ids: vec![1],
+                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![3, 4],
                 parents: vec![3],
                 local_ids: vec![1],
+                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![4, 5],
                 parents: vec![1],
                 local_ids: vec![0],
+                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![5, 0],
                 parents: vec![1],
                 local_ids: vec![2],
+                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![0, 4], // diagonal edge for left quadrilateral
                 parents: vec![0, 1],
                 local_ids: vec![2, 1],
+                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![1, 3], // diagonal edge for right quadrilateral
                 parents: vec![2, 3],
                 local_ids: vec![2, 0],
+                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![1, 4], // shared edge between triangles
                 parents: vec![0, 3],
                 local_ids: vec![1, 2],
+                ref_normal: [0.0, 0.0],
             },
         ];
+        for edge in edges.iter_mut() {
+            edge.compute_ref_tri_normal();
+        }
         let internal_edges = vec![6, 7, 8];
         let boundary_edges = vec![0, 1, 2, 3, 4, 5];
         let elements: Vec<TriangleElement> = vec![

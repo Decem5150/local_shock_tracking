@@ -12,6 +12,8 @@ pub struct TriangleBasis {
     pub dr: Array2<f64>,
     pub ds: Array2<f64>,
     pub nodes_along_edges: Array2<usize>,
+    pub quad_p: Array1<f64>,
+    pub quad_w: Array1<f64>,
     pub cub_r: Array1<f64>,
     pub cub_s: Array1<f64>,
     pub cub_w: Array1<f64>,
@@ -21,10 +23,11 @@ impl TriangleBasis {
         let (x, y) = Self::nodes2d(n);
         let (r, s) = Self::xy_to_rs(x.view(), y.view());
         let vandermonde = Self::vandermonde2d(n, r.view(), s.view());
-        let inv_vandermonde = vandermonde.t().inv().unwrap();
+        let inv_vandermonde = vandermonde.inv().unwrap();
         let l = Self::compute_l(vandermonde.view());
         let (dr, ds) = Self::dmatrices_2d(n, r.view(), s.view(), vandermonde.view());
         let nodes_along_edges = Self::find_nodes_along_edges(n, r.view(), s.view());
+        let (quad_p, quad_w) = Self::jacobi_gauss_lobatto(0.0, 0.0, n);
         let (cub_r, cub_s, cub_w) = Self::cubature_points(n);
         Self {
             r,
@@ -35,6 +38,8 @@ impl TriangleBasis {
             dr,
             ds,
             nodes_along_edges,
+            quad_p,
+            quad_w,
             cub_r,
             cub_s,
             cub_w,
@@ -74,7 +79,7 @@ impl TriangleBasis {
                 }
             })
             .collect::<Vec<usize>>();
-        let fmask3 = r
+        let mut fmask3 = r
             .iter()
             .enumerate()
             .filter_map(|(i, &r_val)| {
@@ -85,9 +90,87 @@ impl TriangleBasis {
                 }
             })
             .collect::<Vec<usize>>();
+        fmask3.reverse();
         assert_eq!(fmask1.len(), nfp);
         assert_eq!(fmask2.len(), nfp);
         assert_eq!(fmask3.len(), nfp);
+        // Verification code
+        println!("=== Edge Node Verification (n={}) ===", n);
+
+        // Verify Edge 0 (bottom edge: s = -1, should be ordered by increasing r)
+        println!("Edge 0 (bottom, s=-1) nodes:");
+        let mut prev_r = f64::NEG_INFINITY;
+        for (idx, &node_id) in fmask1.iter().enumerate() {
+            let r_val = r[node_id];
+            let s_val = s[node_id];
+            println!("  Node {}: r={:.6}, s={:.6}", node_id, r_val, s_val);
+
+            // Verify node is on correct edge
+            assert!(
+                (s_val + 1.0).abs() < node_tol,
+                "Node {} not on bottom edge",
+                node_id
+            );
+
+            // Verify counterclockwise ordering (r should increase)
+            if idx > 0 {
+                assert!(
+                    r_val >= prev_r - node_tol,
+                    "Edge 0 nodes not in counterclockwise order"
+                );
+            }
+            prev_r = r_val;
+        }
+
+        // Verify Edge 1 (diagonal edge: r + s = 0, should be ordered by decreasing r)
+        println!("Edge 1 (diagonal, r+s=0) nodes:");
+        let mut prev_r = f64::INFINITY;
+        for (idx, &node_id) in fmask2.iter().enumerate() {
+            let r_val = r[node_id];
+            let s_val = s[node_id];
+            println!("  Node {}: r={:.6}, s={:.6}", node_id, r_val, s_val);
+
+            // Verify node is on correct edge
+            assert!(
+                (r_val + s_val).abs() < node_tol,
+                "Node {} not on diagonal edge",
+                node_id
+            );
+
+            // Verify counterclockwise ordering (r should decrease)
+            if idx > 0 {
+                assert!(
+                    r_val <= prev_r + node_tol,
+                    "Edge 1 nodes not in counterclockwise order"
+                );
+            }
+            prev_r = r_val;
+        }
+
+        // Verify Edge 2 (left edge: r = -1, should be ordered by decreasing s)
+        println!("Edge 2 (left, r=-1) nodes:");
+        let mut prev_s = f64::INFINITY;
+        for (idx, &node_id) in fmask3.iter().enumerate() {
+            let r_val = r[node_id];
+            let s_val = s[node_id];
+            println!("  Node {}: r={:.6}, s={:.6}", node_id, r_val, s_val);
+
+            // Verify node is on correct edge
+            assert!(
+                (r_val + 1.0).abs() < node_tol,
+                "Node {} not on left edge",
+                node_id
+            );
+
+            // Verify counterclockwise ordering (s should decrease)
+            if idx > 0 {
+                assert!(
+                    s_val <= prev_s + node_tol,
+                    "Edge 2 nodes not in counterclockwise order"
+                );
+            }
+            prev_s = s_val;
+        }
         let mut nodes_along_edges = Array2::<usize>::zeros((3, nfp));
         nodes_along_edges
             .slice_mut(s![0, ..])
@@ -157,21 +240,64 @@ impl TriangleBasis {
             }
         }
     }
-    fn jacobi_gauss_lobatto(alpha: f64, beta: f64, n: usize) -> Array1<f64> {
+    pub fn jacobi_gauss_lobatto(alpha: f64, beta: f64, n: usize) -> (Array1<f64>, Array1<f64>) {
         match n {
             0 => {
                 panic!("n must be at least 1");
             }
             1 => {
-                array![0.0, 1.0]
+                let weight_0 =
+                    2.0_f64.powf(alpha + beta + 1.0) * gamma(alpha + 1.0) * gamma(beta + 1.0)
+                        / gamma(alpha + beta + 2.0);
+                (array![-1.0, 1.0], array![weight_0 / 2.0, weight_0 / 2.0])
             }
             n_order => {
-                let (x, _) = Self::jacobi_gauss_quadrature(alpha + 1.0, beta + 1.0, n_order - 2);
+                let (x_interior, _) =
+                    Self::jacobi_gauss_quadrature(alpha + 1.0, beta + 1.0, n_order - 2);
                 let mut x_lobatto = Array1::<f64>::zeros(n_order + 1);
+                let mut w_lobatto = Array1::<f64>::zeros(n_order + 1);
+
                 x_lobatto[0] = -1.0;
                 x_lobatto[n_order] = 1.0;
-                x_lobatto.slice_mut(s![1..n_order]).assign(&x);
-                x_lobatto
+                x_lobatto.slice_mut(s![1..n_order]).assign(&x_interior);
+
+                // Compute weights
+                let gamma_factor =
+                    2.0_f64.powf(alpha + beta + 1.0) * gamma(alpha + 1.0) * gamma(beta + 1.0)
+                        / gamma(alpha + beta + 2.0);
+
+                // Weight at x = -1
+                let p_n_minus1 =
+                    Self::jacobi_polynomial(array![-1.0].view(), alpha, beta, n_order as i32)[0];
+                w_lobatto[0] = gamma_factor * 2.0_f64.powf(beta)
+                    / ((n_order as f64)
+                        * (n_order as f64 + alpha + beta + 1.0)
+                        * p_n_minus1.powi(2));
+
+                // Weight at x = 1
+                let p_n_plus1 =
+                    Self::jacobi_polynomial(array![1.0].view(), alpha, beta, n_order as i32)[0];
+                w_lobatto[n_order] = gamma_factor * 2.0_f64.powf(alpha)
+                    / ((n_order as f64)
+                        * (n_order as f64 + alpha + beta + 1.0)
+                        * p_n_plus1.powi(2));
+
+                // Weights at interior points
+                for i in 1..n_order {
+                    let x_i = x_lobatto[i];
+                    let p_n =
+                        Self::jacobi_polynomial(array![x_i].view(), alpha, beta, n_order as i32)[0];
+                    let dp_n = Self::grad_jacobi_polynomial(
+                        array![x_i].view(),
+                        alpha,
+                        beta,
+                        n_order as i32,
+                    )[0];
+                    w_lobatto[i] = gamma_factor
+                        / ((n_order as f64) * (n_order as f64 + alpha + beta + 1.0) * p_n * dp_n);
+                }
+
+                (x_lobatto, w_lobatto)
             }
         }
     }
@@ -224,18 +350,10 @@ impl TriangleBasis {
             * Self::jacobi_polynomial(a, 0.0, 0.0, i)
             * Self::jacobi_polynomial(b, 2.0 * i as f64 + 1.0, 0.0, j)
     }
-    fn vandermonde_matrix(n: usize, r: ArrayView1<f64>) -> Array2<f64> {
-        let mut v = Array2::<f64>::zeros((r.len(), n + 1));
-        for j in 0..=n {
-            v.column_mut(j)
-                .assign(&Self::jacobi_polynomial(r, 0.0, 0.0, j as i32));
-        }
-        v
-    }
     fn warp_factor(n: usize, r: ArrayView1<f64>) -> Array1<f64> {
-        let lglr = Self::jacobi_gauss_lobatto(0.0, 0.0, n);
+        let (lglr, _) = Self::jacobi_gauss_lobatto(0.0, 0.0, n);
         let req = Array1::linspace(-1.0, 1.0, n + 1);
-        let veq = Self::vandermonde_matrix(n, req.view());
+        let veq = Self::vandermonde1d(n, req.view());
         let nr = r.len();
         let mut pmat = Array2::<f64>::zeros((n + 1, nr));
         for i in 0..n + 1 {
@@ -260,7 +378,7 @@ impl TriangleBasis {
             0.0000, 0.0000, 1.4152, 0.1001, 0.2751, 0.9800, 1.0999, 1.2832, 1.3648, 1.4773, 1.4959,
             1.5743, 1.5770, 1.6223, 1.6258,
         ];
-        let alpha = alpopt[n];
+        let alpha = if n < 16 { alpopt[n] } else { 5.0 / 3.0 };
         let np = (n + 1) * (n + 2) / 2;
 
         let mut l1 = Array1::<f64>::zeros(np);
@@ -302,7 +420,7 @@ impl TriangleBasis {
         let s = -&l2 - &l3 + &l1;
         (r, s)
     }
-    fn vandermonde1d(n: usize, r: ArrayView1<f64>) -> Array2<f64> {
+    pub fn vandermonde1d(n: usize, r: ArrayView1<f64>) -> Array2<f64> {
         let mut v = Array2::<f64>::zeros((r.len(), n + 1));
         for j in 0..n + 1 {
             v.column_mut(j)
@@ -354,7 +472,7 @@ impl TriangleBasis {
         dmode_ds = dmode_ds * 2.0_f64.powf(id as f64 + 0.5);
         (dmode_dr, dmode_ds)
     }
-    fn grad_vandermonde_2d(
+    pub fn grad_vandermonde_2d(
         n: usize,
         r: ArrayView1<f64>,
         s: ArrayView1<f64>,
@@ -365,10 +483,10 @@ impl TriangleBasis {
         let mut sk: usize = 0;
         for i in 0..n + 1 {
             for j in 0..n + 1 - i {
-                let (v2dr_row, v2ds_row) =
+                let (v2dr_col, v2ds_col) =
                     Self::grad_simplex_2d(a.view(), b.view(), i as i32, j as i32);
-                v2dr.row_mut(sk).assign(&v2dr_row);
-                v2ds.row_mut(sk).assign(&v2ds_row);
+                v2dr.column_mut(sk).assign(&v2dr_col);
+                v2ds.column_mut(sk).assign(&v2ds_col);
                 sk += 1;
             }
         }
