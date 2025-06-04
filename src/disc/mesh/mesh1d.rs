@@ -7,7 +7,7 @@ use ndarray::{Array, ArrayView1, Ix1};
 //     pub boundary_type: BoundaryType,
 //     pub boundary_quantity: Option<BoundaryQuantity1d>,
 // }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Node {
     pub x: f64,
     pub y: f64,

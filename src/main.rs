@@ -17,5 +17,5 @@ fn main() {
     let mut mesh = Mesh2d::create_four_tri_mesh();
     let mut solver =
         initialization::initialize_tri_solver(&mut mesh, basis, enriched_basis, &solver_params);
-    // solver.solve();
+    solver.solve();
 }

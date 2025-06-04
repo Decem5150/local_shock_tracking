@@ -2,6 +2,15 @@ use super::mesh1d::Node;
 use crate::disc::basis::lagrange1d::{LagrangeBasis1D, LagrangeBasis1DLobatto};
 use ndarray::{Array, Array1, Array2, Array4, ArrayView1, Ix1, Ix2, Ix3, Ix4};
 
+#[derive(Clone, Debug)]
+pub struct FlowInBoundary {
+    pub iedges: Vec<usize>,
+    pub value: f64,
+}
+#[derive(Clone, Debug)]
+pub struct FlowOutBoundary {
+    pub iedges: Vec<usize>,
+}
 #[derive(Clone)]
 pub struct Edge {
     pub inodes: Vec<usize>,
@@ -142,6 +151,8 @@ pub struct Mesh2d<T: Element2d> {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     pub elements: Vec<T>,
+    pub flow_in_bnds: Vec<FlowInBoundary>,
+    pub flow_out_bnds: Vec<FlowOutBoundary>,
     pub internal_edges: Vec<usize>,
     pub boundary_edges: Vec<usize>,
     pub free_x: Vec<usize>,
@@ -253,6 +264,8 @@ impl Mesh2d<QuadrilateralElement> {
             nodes,
             edges,
             elements,
+            flow_in_bnds: vec![],
+            flow_out_bnds: vec![],
             internal_edges,
             boundary_edges,
             free_x,
@@ -291,16 +304,16 @@ impl Mesh2d<TriangleElement> {
                 local_ids: vec![2, 1],
             },
             Node {
-                x: 0.4,
+                x: 1.1,
                 y: 1.0,
-                parents: vec![0, 1, 2, 3],
-                local_ids: vec![2, 2, 3, 2],
+                parents: vec![0, 1, 3],
+                local_ids: vec![2, 1, 2],
             },
             Node {
                 x: 0.0,
                 y: 1.0,
                 parents: vec![1],
-                local_ids: vec![1],
+                local_ids: vec![2],
             },
         ];
         let mut edges = vec![
@@ -362,6 +375,19 @@ impl Mesh2d<TriangleElement> {
         for edge in edges.iter_mut() {
             edge.compute_ref_tri_normal();
         }
+        let flow_in_bnds = vec![
+            FlowInBoundary {
+                iedges: vec![0, 5],
+                value: 2.0,
+            },
+            FlowInBoundary {
+                iedges: vec![1],
+                value: 0.0,
+            },
+        ];
+        let flow_out_bnds = vec![FlowOutBoundary {
+            iedges: vec![2, 3, 4],
+        }];
         let internal_edges = vec![6, 7, 8];
         let boundary_edges = vec![0, 1, 2, 3, 4, 5];
         let elements: Vec<TriangleElement> = vec![
@@ -386,6 +412,15 @@ impl Mesh2d<TriangleElement> {
                 ineighbors: vec![2, 0],
             },
         ];
+        /*
+        // print coordinates of nodes in each element
+        for element in elements.iter() {
+            println!("Element: {:?}", element);
+            for inode in element.inodes.iter() {
+                println!("Node: {:?}", nodes[*inode]);
+            }
+        }
+        */
         let free_x = vec![4];
         let interior_node_num = 0;
 
@@ -393,6 +428,8 @@ impl Mesh2d<TriangleElement> {
             nodes,
             edges,
             elements,
+            flow_in_bnds,
+            flow_out_bnds,
             internal_edges,
             boundary_edges,
             free_x,

@@ -66,16 +66,18 @@ impl<'a> ShockTrackingSolverTri<'a> {
         mesh: &'a mut Mesh2d<TriangleElement>,
         solver_params: &'a SolverParameters,
     ) -> Self {
-        let solutions = Array::zeros((
-            mesh.elem_num,
-            solver_params.cell_gp_num * solver_params.cell_gp_num,
-        ));
+        let n = solver_params.polynomial_order;
+        let solutions = Array::zeros((mesh.elem_num, (n + 1) * (n + 2) / 2));
         let disc = Disc1dAdvectionSpaceTimeTri::new(basis, enriched_basis, mesh, solver_params);
         Self {
             solutions,
             disc,
             solver_params,
         }
+    }
+    pub fn solve(&mut self) {
+        self.disc.initialize_solution(self.solutions.view_mut());
+        self.disc.solve(self.solutions.view_mut());
     }
 }
 /*
