@@ -37,7 +37,7 @@ impl TriangleBasis {
         let quad_p = Self::jacobi_gauss_lobatto(0.0, 0.0, n);
         let (_, quad_w_vec) = get_lobatto_points_interval(n + 1);
         let quad_w = Array1::from_iter(quad_w_vec);
-        let (cub_r, cub_s, cub_w) = Self::cubature_points(n);
+        let (cub_r, cub_s, cub_w) = Self::cubature_points(2 * n);
         Self {
             r,
             s,
@@ -271,33 +271,82 @@ impl TriangleBasis {
             }
         }
     }
+    fn calculate_Ak(k_order: f64, alpha: f64, beta: f64) -> f64 {
+        if k_order < 1.0 {
+            // A_0 is not typically defined via this recurrence.
+            // For A_1, k_order would be 1.0.
+            // This formula is generally for k >= 1.
+            // The MATLAB code's `aold` (initial) is A_1.
+            if k_order == 1.0 {
+                // Explicitly A_1
+                return 2.0 / (2.0 + alpha + beta)
+                    * ((alpha + 1.0) * (beta + 1.0) / (alpha + beta + 3.0)).sqrt();
+            }
+            // Fallback or error for k_order < 1 if not A_1, though P_0 is const.
+            // For safety, though P_0 is const and P_1 has its own formula in the match.
+            panic!("A_k calculation is typically for k >= 1");
+        }
+        let h1_for_Ak = 2.0 * (k_order - 1.0) + alpha + beta;
+        let ak_val = 2.0 / (h1_for_Ak + 2.0)
+            * (k_order * (k_order + alpha + beta) * (k_order + alpha) * (k_order + beta)
+                / (h1_for_Ak + 1.0)
+                / (h1_for_Ak + 3.0))
+                .sqrt();
+        if ak_val.is_nan() {
+            // Add a check for NaN, which can happen if terms under sqrt are negative
+            panic!(
+                "NaN encountered in A_k calculation for k={}, alpha={}, beta={}",
+                k_order, alpha, beta
+            );
+        }
+        ak_val
+    }
     fn jacobi_polynomial(x: ArrayView1<f64>, alpha: f64, beta: f64, n: i32) -> Array1<f64> {
         match n {
             0 => {
-                let p0 = (2.0_f64.powf(-alpha - beta - 1.0) * gamma(alpha + beta + 2.0)
-                    / (gamma(alpha + 1.0) * gamma(beta + 1.0)))
-                .sqrt();
+                let gamma0 = 2.0_f64.powf(alpha + beta + 1.0) / (alpha + beta + 1.0)
+                    * gamma(alpha + 1.0)
+                    * gamma(beta + 1.0)
+                    / gamma(alpha + beta + 1.0);
+                let p0 = 1.0 / gamma0.sqrt();
                 Array1::from_elem(x.len(), p0)
             }
             1 => {
-                0.5 * Self::jacobi_polynomial(x.clone(), alpha, beta, 0)
-                    * ((alpha + beta + 2.0) * &x + (alpha - beta))
-                    * ((alpha + beta + 3.0) / ((alpha + 1.0) * (beta + 1.0))).sqrt()
+                let gamma0 = 2.0_f64.powf(alpha + beta + 1.0) / (alpha + beta + 1.0)
+                    * gamma(alpha + 1.0)
+                    * gamma(beta + 1.0)
+                    / gamma(alpha + beta + 1.0);
+                let gamma1 = (alpha + 1.0) * (beta + 1.0) / (alpha + beta + 3.0) * gamma0;
+
+                ((alpha + beta + 2.0) * &x * 0.5 + (alpha - beta) * 0.5) / gamma1.sqrt()
             }
             _ => {
-                let n = n as f64;
-                let aold = 2.0 / (2.0 + alpha + beta)
-                    * ((alpha + 1.0) * (beta + 1.0) / (alpha + beta + 3.0)).sqrt();
-                let h1 = 2.0 * (n - 1.0) + alpha + beta;
-                let anew = 2.0 / (h1 + 2.0)
-                    * (n * (n + alpha + beta) * (n + alpha) * (n + beta) / (h1 + 1.0) / (h1 + 3.0))
-                        .sqrt();
-                let bnew = -(alpha.powi(2) - beta.powi(2)) / h1 / (h1 + 2.0);
-                let n = n as i32;
-                let pn_1 = Self::jacobi_polynomial(x.clone(), alpha, beta, n - 1);
-                let pn_2 = Self::jacobi_polynomial(x.clone(), alpha, beta, n - 2);
+                // For n >= 2
+                let n_f = n as f64;
 
-                (-aold * pn_2 + (&x - bnew) * pn_1) / anew
+                // Coefficient A_n
+                let an = Self::calculate_Ak(n_f, alpha, beta);
+
+                // Coefficient B_n
+                let h1_for_Bn = 2.0 * (n_f - 1.0) + alpha + beta;
+                let bn = -(alpha.powi(2) - beta.powi(2)) / h1_for_Bn / (h1_for_Bn + 2.0);
+
+                // Coefficient A_{n-1}
+                // This is `aold` in the MATLAB loop for the current iteration `i` (where `i+1 = n`)
+                let a_n_minus_1 = Self::calculate_Ak(n_f - 1.0, alpha, beta);
+
+                let pn_1 = Self::jacobi_polynomial(x.view(), alpha, beta, n - 1);
+                let pn_2 = Self::jacobi_polynomial(x.view(), alpha, beta, n - 2);
+
+                // P_n = ( (x - B_n)P_{n-1} - A_{n-1}P_{n-2} ) / A_n
+                if an.abs() < 1e-16 {
+                    // Avoid division by zero or very small A_n
+                    panic!(
+                        "A_n is too small in jacobi_polynomial for n={}, alpha={}, beta={}",
+                        n, alpha, beta
+                    );
+                }
+                ((&x - bn) * pn_1 - a_n_minus_1 * pn_2) / an
             }
         }
     }
@@ -310,7 +359,7 @@ impl TriangleBasis {
             _ => {
                 let pn = Self::jacobi_polynomial(r, alpha + 1.0, beta + 1.0, n - 1);
                 let n = n as f64;
-                dp.assign(&(n * (n + alpha + beta + 1.0).sqrt() * pn));
+                dp.assign(&((n * (n + alpha + beta + 1.0)).sqrt() * pn));
             }
         }
         dp
@@ -441,6 +490,7 @@ impl TriangleBasis {
         dmode_ds = dmode_ds + &fa * &tmp;
         dmode_dr = dmode_dr * 2.0_f64.powf(id as f64 + 0.5);
         dmode_ds = dmode_ds * 2.0_f64.powf(id as f64 + 0.5);
+
         (dmode_dr, dmode_ds)
     }
     pub fn grad_vandermonde_2d(
@@ -472,9 +522,13 @@ impl TriangleBasis {
         let (vr, vs) = Self::grad_vandermonde_2d(n, r, s);
         println!("vr: {:?}", vr);
         println!("vs: {:?}", vs);
-        let v_inv = v.inv().unwrap();
-        let dr = vr.dot(&v_inv);
-        let ds = vs.dot(&v_inv);
+        // We want to compute differentiation matrices Dr and Ds such that:
+        // Dr * V = Vr  =>  V.t() * Dr.t() = Vr.t()
+        // Ds * V = Vs  =>  V.t() * Ds.t() = Vs.t()
+
+        let inv_v = v.inv().unwrap();
+        let dr = vr.dot(&inv_v);
+        let ds = vs.dot(&inv_v);
         (dr, ds)
     }
     fn lift_2d(
@@ -584,12 +638,196 @@ impl TriangleBasis {
                 ];
                 (r, s, weight)
             }
+            5 => {
+                let r = array![
+                    0.33333333333333,
+                    0.47014206410511,
+                    0.47014206410511,
+                    0.05971587178977,
+                    0.10128650732346,
+                    0.10128650732346,
+                    0.79742698535309
+                ];
+                let s = array![
+                    0.33333333333333,
+                    0.47014206410511,
+                    0.05971587178977,
+                    0.47014206410511,
+                    0.10128650732346,
+                    0.79742698535309,
+                    0.10128650732346
+                ];
+                let weight = array![
+                    0.22500000000000,
+                    0.13239415278851,
+                    0.13239415278851,
+                    0.13239415278851,
+                    0.12593918054483,
+                    0.12593918054483,
+                    0.12593918054483
+                ];
+                assert!(r.len() == s.len() && r.len() == weight.len());
+                (r, s, weight)
+            }
+            6 => {
+                let r = array![
+                    0.24928674517091,
+                    0.24928674517091,
+                    0.50142650965818,
+                    0.06308901449150,
+                    0.06308901449150,
+                    0.87382197101700,
+                    0.31035245103378,
+                    0.63650249912140,
+                    0.05314504984482,
+                    0.63650249912140,
+                    0.31035245103378,
+                    0.05314504984482
+                ];
+                let s = array![
+                    0.24928674517091,
+                    0.50142650965818,
+                    0.24928674517091,
+                    0.06308901449150,
+                    0.87382197101700,
+                    0.06308901449150,
+                    0.63650249912140,
+                    0.05314504984482,
+                    0.31035245103378,
+                    0.31035245103378,
+                    0.05314504984482,
+                    0.63650249912140
+                ];
+                let weight = array![
+                    0.11678627572638,
+                    0.11678627572638,
+                    0.11678627572638,
+                    0.05084490637021,
+                    0.05084490637021,
+                    0.05084490637021,
+                    0.08285107561837,
+                    0.08285107561837,
+                    0.08285107561837,
+                    0.08285107561837,
+                    0.08285107561837,
+                    0.08285107561837
+                ];
+                assert!(r.len() == s.len() && r.len() == weight.len());
+                (r, s, weight)
+            }
+            7 => {
+                let r = array![
+                    0.33333333333333,
+                    0.26034596607904,
+                    0.26034596607904,
+                    0.47930806784192,
+                    0.06513010290222,
+                    0.06513010290222,
+                    0.86973979419557,
+                    0.31286549600487,
+                    0.63844418856981,
+                    0.04869031542532,
+                    0.63844418856981,
+                    0.31286549600487,
+                    0.04869031542532
+                ];
+                let s = array![
+                    0.33333333333333,
+                    0.26034596607904,
+                    0.47930806784192,
+                    0.26034596607904,
+                    0.06513010290222,
+                    0.86973979419557,
+                    0.06513010290222,
+                    0.63844418856981,
+                    0.04869031542532,
+                    0.31286549600487,
+                    0.31286549600487,
+                    0.04869031542532,
+                    0.63844418856981
+                ];
+                let weight = array![
+                    -0.14957004446768,
+                    0.17561525743321,
+                    0.17561525743321,
+                    0.17561525743321,
+                    0.05334723560884,
+                    0.05334723560884,
+                    0.05334723560884,
+                    0.07711376089026,
+                    0.07711376089026,
+                    0.07711376089026,
+                    0.07711376089026,
+                    0.07711376089026,
+                    0.07711376089026
+                ];
+                assert!(r.len() == s.len() && r.len() == weight.len());
+                (r, s, weight)
+            }
+            8 => {
+                let r = array![
+                    0.33333333333333,
+                    0.14431560767779,
+                    0.45929258829272,
+                    0.09509163426728,
+                    0.08141482341455,
+                    0.45929258829272,
+                    0.17056930775176,
+                    0.10321737053472,
+                    0.65886138449648,
+                    0.17056930775176,
+                    0.05054722831703,
+                    0.03245849762320,
+                    0.89890554336594,
+                    0.05054722831703,
+                    0.26311282963464,
+                    0.02723031417443
+                ];
+                let s = array![
+                    0.33333333333333,
+                    0.45929258829272,
+                    0.09509163426728,
+                    0.45929258829272,
+                    0.08141482341455,
+                    0.09509163426728,
+                    0.17056930775176,
+                    0.65886138449648,
+                    0.10321737053472,
+                    0.10321737053472,
+                    0.05054722831703,
+                    0.89890554336594,
+                    0.03245849762320,
+                    0.03245849762320,
+                    0.72849239295540,
+                    0.00839477740996
+                ];
+                let weight = array![
+                    0.00839477740996,
+                    0.26311282963464,
+                    0.02723031417443,
+                    0.72849239295540,
+                    0.26311282963464,
+                    0.02723031417443,
+                    0.26311282963464,
+                    0.00839477740996,
+                    0.02723031417443,
+                    0.00839477740996,
+                    0.72849239295540,
+                    0.02723031417443,
+                    0.17056930775176,
+                    0.17056930775176,
+                    0.10321737053472,
+                    0.17056930775176
+                ];
+                assert!(r.len() == s.len() && r.len() == weight.len());
+                (r, s, weight)
+            }
             _ => {
                 panic!("Number of points not supported");
             }
         };
-        let r_new = 2.0 * &s - 1.0;
-        let s_new = 2.0 * &r - 1.0;
+        let r_new = 2.0 * &r - 1.0;
+        let s_new = 2.0 * &s - 1.0;
         let weight_scaled = &weight * 2.0;
         (r_new, s_new, weight_scaled)
     }
@@ -843,5 +1081,196 @@ impl TriangleBasis {
         }
 
         all_tests_passed
+    }
+    pub fn validate_modal_derivatives(&self, n_poly_order: usize, tolerance: f64) {
+        println!(
+            "\n=== Validating Modal Derivatives (grad_vandermonde_2d) for N={} ===",
+            n_poly_order
+        );
+
+        // The derivatives will be validated at the basis's own nodal points (self.r, self.s)
+        // If grad_vandermonde_2d was called with different points (e.g., cubature points),
+        // this validation should use those same points.
+        let test_r_view = self.r.view();
+        let test_s_view = self.s.view();
+
+        let (v2dr, v2ds) = Self::grad_vandermonde_2d(n_poly_order, test_r_view, test_s_view);
+
+        let num_points = test_r_view.len();
+        if num_points == 0 {
+            println!(
+                "  Skipping modal derivative validation: no test points provided (self.r is empty)."
+            );
+            return;
+        }
+        let num_basis_fns = (n_poly_order + 1) * (n_poly_order + 2) / 2;
+
+        // Test 1: Derivative of the constant modal basis function (P_00, mode index 0)
+        // Its derivatives dP/dr and dP/ds should be zero.
+        println!("--- Test 1: Constant Mode (P_00) Derivative Check ---");
+        let mut const_mode_passed = true;
+        if num_basis_fns > 0 {
+            for k_point in 0..num_points {
+                if v2dr[(k_point, 0)].abs() > tolerance {
+                    println!(
+                        "  ❌ FAIL (P_00): dP/dr at point {} (r={:.2e}, s={:.2e}) is {:.2e} (should be ~0)",
+                        k_point,
+                        self.r[k_point],
+                        self.s[k_point],
+                        v2dr[(k_point, 0)]
+                    );
+                    const_mode_passed = false;
+                }
+                if v2ds[(k_point, 0)].abs() > tolerance {
+                    println!(
+                        "  ❌ FAIL (P_00): dP/ds at point {} (r={:.2e}, s={:.2e}) is {:.2e} (should be ~0)",
+                        k_point,
+                        self.r[k_point],
+                        self.s[k_point],
+                        v2ds[(k_point, 0)]
+                    );
+                    const_mode_passed = false;
+                }
+            }
+        } else {
+            const_mode_passed = false; // Or handle as N/A
+            println!("  Skipping constant mode check: num_basis_fns is 0.");
+        }
+        if const_mode_passed {
+            println!(
+                "  ✅ PASS (P_00): Derivatives are zero within tolerance {:.2e}.",
+                tolerance
+            );
+        }
+
+        // Test 2: Finite difference check for a few selected modes and points
+        println!("--- Test 2: Finite Difference Check (FD Epsilon = 1e-7) ---");
+        let eps = 1e-7; // Epsilon for finite differences
+        // Tolerance for FD might need to be looser, e.g., tolerance * 100 or 1e-6
+        let fd_tolerance = tolerance.max(1e-6);
+
+        // Select modes to test: first, P_10-like, P_01-like, and last, if they exist.
+        let mut modes_to_test: Vec<usize> = vec![];
+        if num_basis_fns > 0 {
+            modes_to_test.push(0);
+        } // P_00
+
+        let mut current_sk = 0;
+        let mut p10_sk: Option<usize> = None;
+        let mut p01_sk: Option<usize> = None;
+
+        for i_order in 0..=n_poly_order {
+            for j_order in 0..=(n_poly_order - i_order) {
+                if i_order == 1 && j_order == 0 {
+                    p10_sk = Some(current_sk);
+                }
+                if i_order == 0 && j_order == 1 {
+                    p01_sk = Some(current_sk);
+                }
+                current_sk += 1;
+            }
+        }
+        if let Some(sk) = p10_sk {
+            modes_to_test.push(sk);
+        }
+        if let Some(sk) = p01_sk {
+            modes_to_test.push(sk);
+        }
+        if num_basis_fns > 1 {
+            modes_to_test.push(num_basis_fns - 1);
+        } // Last mode
+
+        modes_to_test.sort();
+        modes_to_test.dedup();
+
+        // Select points to test: first, middle, last (if distinct)
+        let mut points_to_test_indices: Vec<usize> = vec![0];
+        if num_points > 1 {
+            points_to_test_indices.push(num_points / 2);
+            points_to_test_indices.push(num_points - 1);
+        }
+        points_to_test_indices.sort();
+        points_to_test_indices.dedup();
+
+        for &m_basis_idx in &modes_to_test {
+            if m_basis_idx >= num_basis_fns {
+                continue;
+            } // Skip if mode index is out of bounds
+
+            let mut mode_fd_overall_passed = true;
+            println!("  Testing Mode Index: {}", m_basis_idx);
+
+            for &k_point_idx in &points_to_test_indices {
+                let r_k = self.r[k_point_idx];
+                let s_k = self.s[k_point_idx];
+
+                // Analytical derivatives from v2dr, v2ds
+                let anal_dvdr = v2dr[(k_point_idx, m_basis_idx)];
+                let anal_dvds = v2ds[(k_point_idx, m_basis_idx)];
+
+                // Numerical derivative d/dr using central differences
+                let r_plus_eps_arr = Array1::from(vec![r_k + eps]);
+                let r_minus_eps_arr = Array1::from(vec![r_k - eps]);
+                let s_arr_for_dr = Array1::from(vec![s_k]);
+                let phi_r_plus =
+                    Self::vandermonde2d(n_poly_order, r_plus_eps_arr.view(), s_arr_for_dr.view())
+                        [(0, m_basis_idx)];
+                let phi_r_minus =
+                    Self::vandermonde2d(n_poly_order, r_minus_eps_arr.view(), s_arr_for_dr.view())
+                        [(0, m_basis_idx)];
+                let num_dvdr = (phi_r_plus - phi_r_minus) / (2.0 * eps);
+
+                // Numerical derivative d/ds using central differences
+                let r_arr_for_ds = Array1::from(vec![r_k]);
+                let s_plus_eps_arr = Array1::from(vec![s_k + eps]);
+                let s_minus_eps_arr = Array1::from(vec![s_k - eps]);
+                let phi_s_plus =
+                    Self::vandermonde2d(n_poly_order, r_arr_for_ds.view(), s_plus_eps_arr.view())
+                        [(0, m_basis_idx)];
+                let phi_s_minus =
+                    Self::vandermonde2d(n_poly_order, r_arr_for_ds.view(), s_minus_eps_arr.view())
+                        [(0, m_basis_idx)];
+                let num_dvds = (phi_s_plus - phi_s_minus) / (2.0 * eps);
+
+                let dr_abs_error = (anal_dvdr - num_dvdr).abs();
+                let ds_abs_error = (anal_dvds - num_dvds).abs();
+
+                let dr_rel_error = if anal_dvdr.abs() > 1e-9 {
+                    dr_abs_error / anal_dvdr.abs()
+                } else {
+                    dr_abs_error
+                };
+                let ds_rel_error = if anal_dvds.abs() > 1e-9 {
+                    ds_abs_error / anal_dvds.abs()
+                } else {
+                    ds_abs_error
+                };
+
+                let pass_dr = dr_rel_error < fd_tolerance || dr_abs_error < eps.sqrt(); // Looser check for FD
+                let pass_ds = ds_rel_error < fd_tolerance || ds_abs_error < eps.sqrt();
+
+                if !pass_dr {
+                    mode_fd_overall_passed = false;
+                    println!(
+                        "    ❌ dP/dr @ pt {} (r={:.2e},s={:.2e}): Anal={:.4e}, Num={:.4e}, AbsErr={:.2e}, RelErr={:.2e}",
+                        k_point_idx, r_k, s_k, anal_dvdr, num_dvdr, dr_abs_error, dr_rel_error
+                    );
+                }
+                if !pass_ds {
+                    mode_fd_overall_passed = false;
+                    println!(
+                        "    ❌ dP/ds @ pt {} (r={:.2e},s={:.2e}): Anal={:.4e}, Num={:.4e}, AbsErr={:.2e}, RelErr={:.2e}",
+                        k_point_idx, r_k, s_k, anal_dvds, num_dvds, ds_abs_error, ds_rel_error
+                    );
+                }
+            }
+            if mode_fd_overall_passed {
+                println!(
+                    "    ✅ PASS: FD check for mode {} consistent within tolerance {:.2e}.",
+                    m_basis_idx, fd_tolerance
+                );
+            }
+        }
+        println!("=== Modal Derivative Validation Complete ===");
     }
 }

@@ -20,6 +20,38 @@ fn compute_normal(x0: f64, y0: f64, x1: f64, y1: f64) -> [f64; 2] {
     let normal_magnitude = (normal[0].powi(2) + normal[1].powi(2)).sqrt();
     [normal[0] / normal_magnitude, normal[1] / normal_magnitude]
 }
+fn compute_ref_normal(local_id: usize) -> [f64; 2] {
+    match local_id {
+        0 => {
+            // Bottom edge: from (0,0) to (1,0)
+            // Outward normal points downward
+            [0.0, -1.0]
+        }
+        1 => {
+            // Hypotenuse edge: from (1,0) to (0,1)
+            // Edge vector: (-1, 1), normal: (1, 1) normalized
+            let sqrt2_inv = 1.0 / (2.0_f64.sqrt());
+            [sqrt2_inv, sqrt2_inv]
+        }
+        2 => {
+            // Left edge: from (0,1) to (0,0)
+            // Outward normal points leftward
+            [-1.0, 0.0]
+        }
+        _ => {
+            panic!("Invalid edge ID");
+        }
+    }
+}
+fn compute_ref_edge_length(local_id: usize) -> f64 {
+    match local_id {
+        0 => 2.0,
+        1 => 2.0 * 2.0_f64.sqrt(),
+        2 => 2.0,
+        _ => panic!("Invalid edge ID"),
+    }
+}
+
 pub struct Disc1dAdvectionSpaceTimeTri<'a> {
     basis: TriangleBasis,
     enriched_basis: TriangleBasis,
@@ -86,6 +118,7 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
         mesh: &'a mut Mesh2d<TriangleElement>,
         solver_param: &'a SolverParameters,
     ) -> Disc1dAdvectionSpaceTimeTri<'a> {
+        basis.validate_modal_derivatives(solver_param.polynomial_order, 1e-6);
         let interp_node_to_cubature = Self::compute_interp_matrix_2d(
             solver_param.polynomial_order,
             basis.inv_vandermonde.view(),
@@ -123,8 +156,8 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
             basis.cub_s.view(),
             basis.vandermonde.view(), // V computed at nodal points
         );
-        println!("dnodal_dr_at_cubature: {:?}", dnodal_dr_at_cubature);
-        println!("dnodal_ds_at_cubature: {:?}", dnodal_ds_at_cubature);
+        // println!("dnodal_dr_at_cubature: {:?}", dnodal_dr_at_cubature);
+        // println!("dnodal_ds_at_cubature: {:?}", dnodal_ds_at_cubature);
         let enriched_basis_at_cubature =
             interp_enriched_node_to_cubature.dot(&enriched_basis.vandermonde);
         let (denriched_basis_dr_at_cubature, denriched_basis_ds_at_cubature) =
@@ -133,6 +166,86 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
                 enriched_basis.cub_r.view(),
                 enriched_basis.cub_s.view(),
             );
+        println!("=== Testing derivative sum property ===");
+        let mut total_sum_dxi = 0.0;
+        let mut total_sum_deta = 0.0;
+
+        let ncell_basis = basis.r.len();
+        let weights = &basis.cub_w;
+        let ngp = basis.cub_r.len();
+        for itest_func in 0..ncell_basis {
+            let mut total_dxi = 0.0;
+            let mut total_deta = 0.0;
+            for igp in 0..ngp {
+                let dtest_func_dxi = dnodal_dr_at_cubature[(igp, itest_func)];
+                let dtest_func_deta = dnodal_ds_at_cubature[(igp, itest_func)];
+                total_dxi += weights[igp] * dtest_func_dxi;
+                total_deta += weights[igp] * dtest_func_deta;
+            }
+            total_sum_dxi += total_dxi;
+            total_sum_deta += total_deta;
+        }
+        println!(
+            "Sum over all basis functions: [{:.6e}, {:.6e}]",
+            total_sum_dxi, total_sum_deta
+        );
+
+        println!("=== Checking cubature weight sum ===");
+        let total_weight: f64 = basis.cub_w.iter().sum();
+        println!("Sum of cubature weights: {}", total_weight);
+        println!("Expected (triangle area): 2.0");
+        println!("Error: {:.2e}", (total_weight - 2.0).abs());
+
+        println!("=== Checking derivative matrix property ===");
+        let ngp = basis.cub_r.len();
+        let ncell_basis = basis.r.len();
+        let weights = &basis.cub_w;
+
+        for itest_func in 0..ncell_basis {
+            let mut total_dxi = 0.0;
+            let mut total_deta = 0.0;
+            for igp in 0..ngp {
+                let dtest_func_dxi = dnodal_dr_at_cubature[(igp, itest_func)];
+                let dtest_func_deta = dnodal_ds_at_cubature[(igp, itest_func)];
+                total_dxi += weights[igp] * dtest_func_dxi;
+                total_deta += weights[igp] * dtest_func_deta;
+            }
+            println!(
+                "Basis {}: ∫∇v dΩ = [{:.6e}, {:.6e}]",
+                itest_func, total_dxi, total_deta
+            );
+        }
+        /*
+        println!("=== Testing modal basis orthogonality (Mass Matrix) ===");
+        // The modal basis functions are rows of V.
+        // We want to check ∫ φ_i φ_j dΩ.
+        // φ_i at cubature points are given by interp_node_to_cubature.row(i)
+        // Mass matrix M_ij = Σ_k w_k * φ_i(r_k, s_k) * φ_j(r_k, s_k)
+        // M = interp_node_to_cubature^T * W * interp_node_to_cubature
+        // where W is a diagonal matrix with cubature weights.
+        // For an orthogonal basis, M should be diagonal.
+
+        let modal_basis_at_cubature = TriangleBasis::vandermonde2d(
+            solver_param.polynomial_order,
+            basis.cub_r.view(),
+            basis.cub_s.view(),
+        );
+
+        let mut modal_mass_matrix = Array2::<f64>::zeros((ncell_basis, ncell_basis));
+        for i in 0..ncell_basis {
+            for j in 0..ncell_basis {
+                let mut integral = 0.0;
+                for k in 0..ngp {
+                    integral += weights[k]
+                        * modal_basis_at_cubature[(k, i)]
+                        * modal_basis_at_cubature[(k, j)];
+                }
+                modal_mass_matrix[(i, j)] = integral;
+            }
+        }
+
+        println!("Mass Matrix M:\n{:?}", modal_mass_matrix);
+        */
         Disc1dAdvectionSpaceTimeTri {
             basis,
             enriched_basis,
@@ -195,6 +308,7 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
         let cell_weights = &basis.cub_w;
         let edge_weights = &basis.quad_w;
         for (ielem, elem) in mesh.elements.iter().enumerate() {
+            println!("ielem: {}", ielem);
             let inodes = &elem.inodes;
             let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
             let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
@@ -221,10 +335,10 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
         for &iedge in mesh.internal_edges.iter() {
             println!("iedge: {}", iedge);
             let edge = &mesh.edges[iedge];
-            let left_ref_normal = edge.ref_normal;
-            let right_ref_normal = edge.ref_normal.map(|x| -x);
             let ilelem = edge.parents[0];
+            println!("ilelem: {}", ilelem);
             let irelem = edge.parents[1];
+            println!("irelem: {}", irelem);
             let left_elem = &mesh.elements[ilelem];
             let right_elem = &mesh.elements[irelem];
             let left_inodes = &left_elem.inodes;
@@ -233,9 +347,18 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
             let left_y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[left_inodes[i]].y);
             let right_x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[right_inodes[i]].x);
             let right_y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[right_inodes[i]].y);
+            println!("left_x_slice: {:?}", left_x_slice);
+            println!("left_y_slice: {:?}", left_y_slice);
+            println!("right_x_slice: {:?}", right_x_slice);
+            println!("right_y_slice: {:?}", right_y_slice);
             let common_edge = [edge.local_ids[0], edge.local_ids[1]];
+            println!("common_edge: {:?}", common_edge);
             let node_along_edges = &basis.nodes_along_edges;
             let local_ids = &edge.local_ids;
+            let left_ref_normal = compute_ref_normal(local_ids[0]);
+            let right_ref_normal = compute_ref_normal(local_ids[1]);
+            let left_edge_length = compute_ref_edge_length(local_ids[0]);
+            let right_edge_length = compute_ref_edge_length(local_ids[1]);
             let left_sol_slice = solutions.slice(s![ilelem, ..]).select(
                 Axis(0),
                 node_along_edges
@@ -281,6 +404,13 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
             for i in 0..nedge_basis {
                 let left_value = left_sol_slice[i];
                 let right_value = right_sol_slice[nedge_basis - 1 - i];
+                let normal = compute_normal(
+                    left_x_slice[common_edge[0]],
+                    left_y_slice[common_edge[0]],
+                    left_x_slice[(common_edge[0] + 1) % 3],
+                    left_y_slice[(common_edge[0] + 1) % 3],
+                );
+                println!("normal: {:?}", normal);
                 let num_flux = self.compute_numerical_flux(
                     self.advection_speed,
                     left_value,
@@ -290,13 +420,23 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
                     left_y_slice[common_edge[0]],
                     left_y_slice[(common_edge[0] + 1) % 3],
                 );
-                // println!("num_flux: {}", num_flux);
+                println!("num_flux: {}", num_flux);
+                println!("left_xi_slice[i]: {}", left_xi_slice[i]);
+                println!("left_eta_slice[i]: {}", left_eta_slice[i]);
                 let left_scaling = self.compute_flux_scaling(
                     left_xi_slice[i],
                     left_eta_slice[i],
                     left_ref_normal,
                     &left_x_slice,
                     &left_y_slice,
+                );
+                println!(
+                    "right_xi_slice[nedge_basis - 1 - i]: {}",
+                    right_xi_slice[nedge_basis - 1 - i]
+                );
+                println!(
+                    "right_eta_slice[nedge_basis - 1 - i]: {}",
+                    right_eta_slice[nedge_basis - 1 - i]
                 );
                 let right_scaling = self.compute_flux_scaling(
                     right_xi_slice[nedge_basis - 1 - i],
@@ -305,14 +445,18 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
                     &right_x_slice,
                     &right_y_slice,
                 );
-
+                println!("left_scaling: {}", left_scaling);
+                println!("right_scaling: {}", right_scaling);
                 let left_transformed_flux = num_flux * left_scaling;
                 let right_transformed_flux = -num_flux * right_scaling;
-
+                println!("left_transformed_flux: {}", left_transformed_flux);
+                println!("right_transformed_flux: {}", right_transformed_flux);
                 let left_itest_func = basis.nodes_along_edges[(local_ids[0], i)];
                 let right_itest_func = basis.nodes_along_edges[(local_ids[1], nedge_basis - 1 - i)];
-                residuals[(ilelem, left_itest_func)] += edge_weights[i] * left_transformed_flux;
-                residuals[(irelem, right_itest_func)] += edge_weights[i] * right_transformed_flux;
+                residuals[(ilelem, left_itest_func)] +=
+                    0.5 * left_edge_length * edge_weights[i] * left_transformed_flux;
+                residuals[(irelem, right_itest_func)] +=
+                    0.5 * right_edge_length * edge_weights[i] * right_transformed_flux;
             }
         }
         println!("residuals_after_edge_integral: {:?}", residuals);
@@ -322,15 +466,18 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
             let iedges = &ibnd.iedges;
             let value = ibnd.value;
             for &iedge in iedges.iter() {
+                println!("iedge: {}", iedge);
                 let edge = &mesh.edges[iedge];
-                let ref_normal = edge.ref_normal;
                 let ielem = edge.parents[0];
+                println!("ielem: {}", ielem);
                 let elem = &mesh.elements[ielem];
                 let inodes = &elem.inodes;
                 let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
                 let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
                 let nodes_along_edges = &basis.nodes_along_edges;
                 let local_ids = &edge.local_ids;
+                let ref_normal = compute_ref_normal(local_ids[0]);
+                let edge_length = compute_ref_edge_length(local_ids[0]);
                 let xi_slice = basis.r.select(
                     Axis(0),
                     nodes_along_edges
@@ -356,11 +503,16 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
                         y_slice[local_ids[0]],
                         y_slice[(local_ids[0] + 1) % 3],
                     );
+                    println!("boundary_flux: {}", boundary_flux);
                     let scaling =
                         self.compute_flux_scaling(xi, eta, ref_normal, &x_slice, &y_slice);
+                    println!("scaling: {}", scaling);
                     let transformed_flux = boundary_flux * scaling;
+                    println!("transformed_flux: {}", transformed_flux);
                     let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
-                    residuals[(ielem, itest_func)] += edge_weights[i] * transformed_flux;
+                    println!("itest_func: {}", itest_func);
+                    residuals[(ielem, itest_func)] +=
+                        0.5 * edge_length * edge_weights[i] * transformed_flux;
                 }
             }
         }
@@ -369,15 +521,18 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
         for ibnd in mesh.flow_out_bnds.iter() {
             let iedges = &ibnd.iedges;
             for &iedge in iedges.iter() {
+                println!("iedge: {}", iedge);
                 let edge = &mesh.edges[iedge];
-                let ref_normal = edge.ref_normal;
                 let ielem = edge.parents[0];
+                println!("ielem: {}", ielem);
                 let elem = &mesh.elements[ielem];
                 let inodes = &elem.inodes;
                 let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
                 let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
                 let nodes_along_edges = &basis.nodes_along_edges;
                 let local_ids = &edge.local_ids;
+                let ref_normal = compute_ref_normal(local_ids[0]);
+                let edge_length = compute_ref_edge_length(local_ids[0]);
                 let sol_slice = solutions.slice(s![ielem, ..]).select(
                     Axis(0),
                     nodes_along_edges
@@ -400,14 +555,9 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
                         .unwrap(),
                 );
                 for i in 0..nedge_basis {
+                    println!("i: {}", i);
                     let xi = xi_slice[i];
                     let eta = eta_slice[i];
-                    let normal = compute_normal(
-                        x_slice[local_ids[0]],
-                        y_slice[local_ids[0]],
-                        x_slice[(local_ids[0] + 1) % 3],
-                        y_slice[(local_ids[0] + 1) % 3],
-                    );
                     let boundary_flux = self.compute_boundary_flux(
                         self.advection_speed,
                         sol_slice[i],
@@ -416,11 +566,16 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
                         y_slice[local_ids[0]],
                         y_slice[(local_ids[0] + 1) % 3],
                     );
+                    println!("boundary_flux: {}", boundary_flux);
                     let scaling =
                         self.compute_flux_scaling(xi, eta, ref_normal, &x_slice, &y_slice);
+                    println!("scaling: {}", scaling);
                     let transformed_flux = boundary_flux * scaling;
+                    println!("transformed_flux: {}", transformed_flux);
                     let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
-                    residuals[(ielem, itest_func)] += edge_weights[i] * transformed_flux;
+                    println!("itest_func: {}", itest_func);
+                    residuals[(ielem, itest_func)] +=
+                        0.5 * edge_length * edge_weights[i] * transformed_flux;
                 }
             }
         }
@@ -439,7 +594,6 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
         let mut res = 0.0;
         for igp in 0..ngp {
             let f = space_time_flux1d(sol[igp], self.advection_speed);
-            println!("f: {:?}", f);
             let xi = basis.cub_r[igp];
             let eta = basis.cub_s[igp];
             let (jacob_det, jacob_inv_t) = evaluate_jacob(xi, eta, x, y);
@@ -451,9 +605,27 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
             };
             let dtest_func_dxi = self.dnodal_dr_at_cubature[(igp, itest_func)];
             let dtest_func_deta = self.dnodal_ds_at_cubature[(igp, itest_func)];
+            /*
+            println!("itest_func: {}, sol values: {:?}", itest_func, sol);
+            println!("flux values: {:?}", f);
+            println!("transformed_f: {:?}", transformed_f);
+            println!("derivatives: dξ={}, dη={}", dtest_func_dxi, dtest_func_deta);
+            */
             res -= weights[igp] * transformed_f[0] * dtest_func_dxi
                 + weights[igp] * transformed_f[1] * dtest_func_deta;
         }
+        let mut total_dxi = 0.0;
+        let mut total_deta = 0.0;
+        for igp in 0..ngp {
+            let dtest_func_dxi = self.dnodal_dr_at_cubature[(igp, itest_func)];
+            let dtest_func_deta = self.dnodal_ds_at_cubature[(igp, itest_func)];
+            total_dxi += weights[igp] * dtest_func_dxi;
+            total_deta += weights[igp] * dtest_func_deta;
+        }
+        println!(
+            "For test func {}: ∫∇v·dΩ = [{}, {}]",
+            itest_func, total_dxi, total_deta
+        );
         res
     }
     fn compute_boundary_flux(
@@ -498,20 +670,25 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
         y: &[f64],
     ) -> f64 {
         let (jacob_det, jacob_inv_t) = evaluate_jacob(xi, eta, x, y);
+        println!("jacob_det: {}", jacob_det);
+        println!("jacob_inv_t: {:?}", jacob_inv_t);
+        println!("ref_normal: {:?}", ref_normal);
         let transformed_normal = {
             [
                 jacob_inv_t[0] * ref_normal[0] + jacob_inv_t[1] * ref_normal[1],
                 jacob_inv_t[2] * ref_normal[0] + jacob_inv_t[3] * ref_normal[1],
             ]
         };
+        println!("transformed_normal: {:?}", transformed_normal);
         let normal_magnitude =
             (transformed_normal[0].powi(2) + transformed_normal[1].powi(2)).sqrt();
+        println!("normal_magnitude: {}", normal_magnitude);
         jacob_det * normal_magnitude
     }
     pub fn initialize_solution(&mut self, mut solutions: ArrayViewMut2<f64>) {
         solutions.slice_mut(s![0, ..]).fill(2.0);
         solutions.slice_mut(s![1, ..]).fill(2.0);
-        solutions.slice_mut(s![2, ..]).fill(0.0);
-        solutions.slice_mut(s![3, ..]).fill(0.0);
+        solutions.slice_mut(s![2, ..]).fill(1.0);
+        solutions.slice_mut(s![3, ..]).fill(1.0);
     }
 }

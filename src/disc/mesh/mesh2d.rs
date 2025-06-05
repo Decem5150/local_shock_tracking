@@ -344,7 +344,7 @@ impl Mesh2d<TriangleElement> {
             Edge {
                 inodes: vec![4, 5],
                 parents: vec![1],
-                local_ids: vec![0],
+                local_ids: vec![1],
                 ref_normal: [0.0, 0.0],
             },
             Edge {
@@ -354,13 +354,13 @@ impl Mesh2d<TriangleElement> {
                 ref_normal: [0.0, 0.0],
             },
             Edge {
-                inodes: vec![0, 4], // diagonal edge for left quadrilateral
+                inodes: vec![4, 0], // diagonal edge for left quadrilateral
                 parents: vec![0, 1],
-                local_ids: vec![2, 1],
+                local_ids: vec![2, 0],
                 ref_normal: [0.0, 0.0],
             },
             Edge {
-                inodes: vec![1, 3], // diagonal edge for right quadrilateral
+                inodes: vec![3, 1], // diagonal edge for right quadrilateral
                 parents: vec![2, 3],
                 local_ids: vec![2, 0],
                 ref_normal: [0.0, 0.0],
@@ -382,7 +382,7 @@ impl Mesh2d<TriangleElement> {
             },
             FlowInBoundary {
                 iedges: vec![1],
-                value: 0.0,
+                value: 1.0,
             },
         ];
         let flow_out_bnds = vec![FlowOutBoundary {
