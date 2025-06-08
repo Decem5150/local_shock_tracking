@@ -18,6 +18,8 @@ pub struct TriangleBasis {
     pub cub_r: Array1<f64>,
     pub cub_s: Array1<f64>,
     pub cub_w: Array1<f64>,
+    pub dr_cub: Array2<f64>,
+    pub ds_cub: Array2<f64>,
 }
 impl TriangleBasis {
     pub fn new(n: usize) -> Self {
@@ -37,7 +39,9 @@ impl TriangleBasis {
         let quad_p = Self::jacobi_gauss_lobatto(0.0, 0.0, n);
         let (_, quad_w_vec) = get_lobatto_points_interval(n + 1);
         let quad_w = Array1::from_iter(quad_w_vec);
-        let (cub_r, cub_s, cub_w) = Self::cubature_points(2 * n);
+        let (cub_r, cub_s, cub_w) = Self::cubature_points(2 * n - 1);
+        let (dr_cub, ds_cub) =
+            Self::dmatrices_2d(n, cub_r.view(), cub_s.view(), vandermonde.view());
         Self {
             r,
             s,
@@ -51,6 +55,8 @@ impl TriangleBasis {
             cub_r,
             cub_s,
             cub_w,
+            dr_cub,
+            ds_cub,
         }
     }
     fn compute_l(v: ArrayView2<f64>) -> Array2<f64> {

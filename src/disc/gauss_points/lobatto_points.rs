@@ -21,7 +21,7 @@ pub fn get_lobatto_points_interval(points_num: usize) -> (Vec<f64>, Vec<f64>) {
                 49.0 / 90.0,
                 32.0 / 45.0,
                 49.0 / 90.0,
-                1.0 / 20.0,
+                1.0 / 10.0,
             ];
             (points, weights)
         }
