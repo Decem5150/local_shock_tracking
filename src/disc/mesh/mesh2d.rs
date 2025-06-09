@@ -155,7 +155,7 @@ pub struct Mesh2d<T: Element2d> {
     pub flow_out_bnds: Vec<FlowOutBoundary>,
     pub internal_edges: Vec<usize>,
     pub boundary_edges: Vec<usize>,
-    pub free_x: Vec<usize>,
+    pub free_coords: Vec<usize>,
     pub interior_node_num: usize,
     pub elem_num: usize,
     pub node_num: usize,
@@ -258,7 +258,7 @@ impl Mesh2d<QuadrilateralElement> {
                 ineighbors: vec![0],
             },
         ];
-        let free_x = vec![4];
+        let free_coords = vec![4];
         let interior_node_num = 0;
         let mesh = Mesh2d {
             nodes,
@@ -268,7 +268,7 @@ impl Mesh2d<QuadrilateralElement> {
             flow_out_bnds: vec![],
             internal_edges,
             boundary_edges,
-            free_x,
+            free_coords,
             interior_node_num,
             elem_num: 2,
             node_num: 6,
@@ -304,7 +304,7 @@ impl Mesh2d<TriangleElement> {
                 local_ids: vec![2, 1],
             },
             Node {
-                x: 1.1,
+                x: 0.4,
                 y: 1.0,
                 parents: vec![0, 1, 3],
                 local_ids: vec![2, 1, 2],
@@ -421,7 +421,7 @@ impl Mesh2d<TriangleElement> {
             }
         }
         */
-        let free_x = vec![4];
+        let free_coords = vec![4];
         let interior_node_num = 0;
 
         let mesh = Mesh2d {
@@ -432,7 +432,7 @@ impl Mesh2d<TriangleElement> {
             flow_out_bnds,
             internal_edges,
             boundary_edges,
-            free_x,
+            free_coords,
             interior_node_num,
             elem_num: 4,
             node_num: 6,

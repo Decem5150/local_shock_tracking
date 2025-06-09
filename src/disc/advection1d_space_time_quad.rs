@@ -90,9 +90,9 @@ impl<'a> Disc1dAdvectionSpaceTimeQuad<'a> {
     ) -> (Array1<f64>, Array1<f64>) {
         let nelem = self.mesh.elem_num;
         let unenriched_cell_ngp = self.solver_param.cell_gp_num;
-        let free_x = &self.mesh.free_x;
+        let free_coords = &self.mesh.free_coords;
         let num_u = nelem * unenriched_cell_ngp * unenriched_cell_ngp;
-        let num_x: usize = free_x.len();
+        let num_x: usize = free_coords.len();
         let num_lambda = num_u;
         let n_total = num_u + num_x + num_lambda;
 
@@ -159,9 +159,9 @@ impl<'a> Disc1dAdvectionSpaceTimeQuad<'a> {
         let max_line_search_iter = 20;
         let max_sqp_iter = 100;
         let interior_nnodes = self.mesh.interior_node_num;
-        let free_x = &self.mesh.free_x;
+        let free_coords = &self.mesh.free_coords;
         let mut node_constraints: Array2<f64> =
-            Array2::zeros((2 * nnode, 2 * interior_nnodes + free_x.len()));
+            Array2::zeros((2 * nnode, 2 * interior_nnodes + free_coords.len()));
         node_constraints[(4, 0)] = 1.0;
 
         let mut residuals: Array2<f64> =
@@ -193,7 +193,7 @@ impl<'a> Disc1dAdvectionSpaceTimeQuad<'a> {
             enriched_dx.fill(0.0);
 
             println!("solutions: {:?}", solutions);
-            println!("node: {:?}", self.mesh.nodes[free_x[0]].x);
+            println!("node: {:?}", self.mesh.nodes[free_coords[0]].x);
             self.compute_residuals_and_derivatives(
                 solutions.view(),
                 residuals.view_mut(),
@@ -257,7 +257,7 @@ impl<'a> Disc1dAdvectionSpaceTimeQuad<'a> {
                 .dot(&enriched_dx.dot(&node_constraints));
             println!("hessian_xx: {:?}", hessian_xx);
             // add an identity matrix to hessian_xx
-            hessian_xx += &(1e-8 * &Array2::eye(2 * interior_nnodes + free_x.len()));
+            hessian_xx += &(1e-8 * &Array2::eye(2 * interior_nnodes + free_coords.len()));
 
             let (delta_u, delta_x) = self.solve_linear_subproblem(
                 node_constraints.view(),
@@ -281,7 +281,7 @@ impl<'a> Disc1dAdvectionSpaceTimeQuad<'a> {
                 let u = u_flat
                     .to_shape((nelem, unenriched_cell_ngp * unenriched_cell_ngp))
                     .unwrap();
-                tmp_mesh.nodes[free_x[0]].x += alpha * delta_x[0];
+                tmp_mesh.nodes[free_coords[0]].x += alpha * delta_x[0];
                 let mut tmp_res = Array2::zeros((nelem, unenriched_cell_ngp * unenriched_cell_ngp));
                 self.compute_residuals(&tmp_mesh, u.view(), tmp_res.view_mut(), false);
                 let enriched_u = self.interpolate_to_enriched(u.view());
@@ -319,7 +319,7 @@ impl<'a> Disc1dAdvectionSpaceTimeQuad<'a> {
             }
 
             solutions.scaled_add(alpha, &delta_u.to_shape(solutions.shape()).unwrap());
-            for (i, &ix) in free_x.iter().enumerate() {
+            for (i, &ix) in free_coords.iter().enumerate() {
                 self.mesh.nodes[ix].x += alpha * delta_x[i];
             }
             iter += 1;
