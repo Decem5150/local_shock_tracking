@@ -304,7 +304,7 @@ impl Mesh2d<TriangleElement> {
                 local_ids: vec![2, 1],
             },
             Node {
-                x: 0.4,
+                x: 1.5,
                 y: 1.0,
                 parents: vec![0, 1, 3],
                 local_ids: vec![2, 1, 2],
@@ -436,6 +436,245 @@ impl Mesh2d<TriangleElement> {
             interior_node_num,
             elem_num: 4,
             node_num: 6,
+        };
+        mesh
+    }
+    pub fn create_eight_tri_mesh() -> Mesh2d<TriangleElement> {
+        let nodes = vec![
+            Node {
+                x: 0.0,
+                y: 0.0,
+                parents: vec![0, 1],
+                local_ids: vec![0, 0],
+            },
+            Node {
+                x: 1.0,
+                y: 0.0,
+                parents: vec![0, 2, 3],
+                local_ids: vec![1, 0, 0],
+            },
+            Node {
+                x: 2.0,
+                y: 0.0,
+                parents: vec![2],
+                local_ids: vec![1],
+            },
+            Node {
+                x: 0.0,
+                y: 1.0,
+                parents: vec![1, 4, 5],
+                local_ids: vec![2, 0, 0],
+            },
+            Node {
+                x: 1.0,
+                y: 1.0,
+                parents: vec![0, 1, 3, 4, 6, 7],
+                local_ids: vec![2, 1, 2, 1, 0, 0],
+            },
+            Node {
+                x: 2.0,
+                y: 1.0,
+                parents: vec![2, 3, 6],
+                local_ids: vec![2, 1, 1],
+            },
+            Node {
+                x: 0.0,
+                y: 2.0,
+                parents: vec![5],
+                local_ids: vec![2],
+            },
+            Node {
+                x: 1.0,
+                y: 2.0,
+                parents: vec![4, 5, 7],
+                local_ids: vec![2, 1, 2],
+            },
+            Node {
+                x: 2.0,
+                y: 2.0,
+                parents: vec![6, 7],
+                local_ids: vec![2, 1],
+            },
+        ];
+
+        let mut edges = vec![
+            // Horizontal edges
+            Edge {
+                inodes: vec![0, 1],
+                parents: vec![0],
+                local_ids: vec![0],
+                ref_normal: [0.0, 0.0],
+            }, // 0
+            Edge {
+                inodes: vec![1, 2],
+                parents: vec![2],
+                local_ids: vec![0],
+                ref_normal: [0.0, 0.0],
+            }, // 1
+            Edge {
+                inodes: vec![3, 4],
+                parents: vec![1, 4],
+                local_ids: vec![1, 0],
+                ref_normal: [0.0, 0.0],
+            }, // 2
+            Edge {
+                inodes: vec![4, 5],
+                parents: vec![3, 6],
+                local_ids: vec![1, 0],
+                ref_normal: [0.0, 0.0],
+            }, // 3
+            Edge {
+                inodes: vec![6, 7],
+                parents: vec![5],
+                local_ids: vec![1],
+                ref_normal: [0.0, 0.0],
+            }, // 4
+            Edge {
+                inodes: vec![7, 8],
+                parents: vec![7],
+                local_ids: vec![1],
+                ref_normal: [0.0, 0.0],
+            }, // 5
+            // Vertical edges
+            Edge {
+                inodes: vec![0, 3],
+                parents: vec![1],
+                local_ids: vec![2],
+                ref_normal: [0.0, 0.0],
+            }, // 6
+            Edge {
+                inodes: vec![1, 4],
+                parents: vec![0, 3],
+                local_ids: vec![1, 2],
+                ref_normal: [0.0, 0.0],
+            }, // 7
+            Edge {
+                inodes: vec![2, 5],
+                parents: vec![2],
+                local_ids: vec![1],
+                ref_normal: [0.0, 0.0],
+            }, // 8
+            Edge {
+                inodes: vec![3, 6],
+                parents: vec![5],
+                local_ids: vec![2],
+                ref_normal: [0.0, 0.0],
+            }, // 9
+            Edge {
+                inodes: vec![4, 7],
+                parents: vec![4, 7],
+                local_ids: vec![1, 2],
+                ref_normal: [0.0, 0.0],
+            }, // 10
+            Edge {
+                inodes: vec![5, 8],
+                parents: vec![6],
+                local_ids: vec![1],
+                ref_normal: [0.0, 0.0],
+            }, // 11
+            // Diagonal edges
+            Edge {
+                inodes: vec![0, 4],
+                parents: vec![0, 1],
+                local_ids: vec![2, 0],
+                ref_normal: [0.0, 0.0],
+            }, // 12
+            Edge {
+                inodes: vec![1, 5],
+                parents: vec![2, 3],
+                local_ids: vec![2, 0],
+                ref_normal: [0.0, 0.0],
+            }, // 13
+            Edge {
+                inodes: vec![3, 7],
+                parents: vec![4, 5],
+                local_ids: vec![2, 0],
+                ref_normal: [0.0, 0.0],
+            }, // 14
+            Edge {
+                inodes: vec![4, 8],
+                parents: vec![6, 7],
+                local_ids: vec![2, 0],
+                ref_normal: [0.0, 0.0],
+            }, // 15
+        ];
+
+        for edge in edges.iter_mut() {
+            edge.compute_ref_tri_normal();
+        }
+
+        let flow_in_bnds = vec![
+            FlowInBoundary {
+                iedges: vec![0, 6, 9],
+                value: 2.0,
+            },
+            FlowInBoundary {
+                iedges: vec![1],
+                value: 1.0,
+            },
+        ];
+        let flow_out_bnds = vec![FlowOutBoundary {
+            iedges: vec![4, 5, 8, 11],
+        }];
+
+        let boundary_edges = vec![0, 1, 4, 5, 6, 8, 9, 11];
+        let internal_edges = vec![2, 3, 7, 10, 12, 13, 14, 15];
+
+        let elements: Vec<TriangleElement> = vec![
+            TriangleElement {
+                inodes: [0, 1, 4],
+                iedges: [0, 7, 12],
+                ineighbors: vec![3, 1],
+            },
+            TriangleElement {
+                inodes: [0, 4, 3],
+                iedges: [12, 2, 6],
+                ineighbors: vec![0, 4],
+            },
+            TriangleElement {
+                inodes: [1, 2, 5],
+                iedges: [1, 8, 13],
+                ineighbors: vec![3],
+            },
+            TriangleElement {
+                inodes: [1, 5, 4],
+                iedges: [13, 3, 7],
+                ineighbors: vec![2, 6, 0],
+            },
+            TriangleElement {
+                inodes: [3, 4, 7],
+                iedges: [2, 10, 14],
+                ineighbors: vec![1, 7, 5],
+            },
+            TriangleElement {
+                inodes: [3, 7, 6],
+                iedges: [14, 4, 9],
+                ineighbors: vec![4],
+            },
+            TriangleElement {
+                inodes: [4, 5, 8],
+                iedges: [3, 11, 15],
+                ineighbors: vec![3, 7],
+            },
+            TriangleElement {
+                inodes: [4, 8, 7],
+                iedges: [15, 5, 10],
+                ineighbors: vec![6, 4],
+            },
+        ];
+        let free_coords = vec![1, 7, 12, 14];
+        let mesh = Mesh2d {
+            nodes,
+            edges,
+            elements,
+            flow_in_bnds,
+            flow_out_bnds,
+            internal_edges,
+            boundary_edges,
+            free_coords,
+            interior_node_num: 1, // Node 4 is interior
+            elem_num: 8,
+            node_num: 9,
         };
         mesh
     }

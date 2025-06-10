@@ -250,7 +250,7 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
             denriched_basis_ds_at_cubature,
             mesh,
             solver_param,
-            advection_speed: 0.1,
+            advection_speed: 0.8,
         }
     }
     fn compute_interp_matrix_1d(
@@ -288,8 +288,11 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
         let nelem = self.mesh.elem_num;
         let ncell_basis = self.basis.r.len();
         let free_coords = &self.mesh.free_coords;
+        let interior_nnodes = self.mesh.interior_node_num;
         let num_u = nelem * ncell_basis;
-        let num_x: usize = free_coords.len();
+        let num_x: usize = free_coords.len() + 2 * interior_nnodes;
+        println!("num_u: {:?}", num_u);
+        println!("num_x: {:?}", num_x);
         let num_lambda = num_u;
         let n_total = num_u + num_x + num_lambda;
 
@@ -350,15 +353,17 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
         let nnode = self.mesh.node_num;
         let ncell_basis = self.basis.r.len();
         let enriched_ncell_basis = self.enriched_basis.r.len();
-        let epsilon1 = 1e-5;
-        let epsilon2 = 1e-10;
+        let epsilon1 = 1e-10;
+        let epsilon2 = 1e-15;
         let max_line_search_iter = 20;
-        let max_sqp_iter = 100;
+        let max_sqp_iter = 30;
         let interior_nnodes = self.mesh.interior_node_num;
         let free_coords = &self.mesh.free_coords;
+        // println!("free_coords: {:?}", free_coords);
         let mut node_constraints: Array2<f64> =
             Array2::zeros((2 * nnode, 2 * interior_nnodes + free_coords.len()));
-        node_constraints[(4, 0)] = 1.0;
+        // node_constraints[(4, 0)] = 1.0;
+        node_constraints[(14, 5)] = 1.0;
 
         let mut residuals: Array2<f64> = Array2::zeros((nelem, ncell_basis));
         let mut dsol: Array2<f64> = Array2::zeros((nelem * ncell_basis, nelem * ncell_basis));
@@ -383,7 +388,7 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
             enriched_dx.fill(0.0);
             enriched_dy.fill(0.0);
             println!("solutions: {:?}", solutions);
-            println!("nodes: {:?}", self.mesh.nodes[free_coords[0]].x);
+            println!("nodes: {:?}", self.mesh.nodes[free_coords[3] % nnode].y);
             self.compute_residuals_and_derivatives(
                 solutions.view(),
                 residuals.view_mut(),
@@ -437,7 +442,7 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
                 .dot(&node_constraints)
                 .t()
                 .dot(&enriched_dcoord.dot(&node_constraints));
-            hessian_xx += &(1e-8 * &Array2::eye(2 * interior_nnodes + free_coords.len()));
+            hessian_xx += &(1e-5 * &Array2::eye(2 * interior_nnodes + free_coords.len()));
 
             let (delta_u, delta_x) = self.solve_linear_subproblem(
                 node_constraints.view(),
@@ -450,14 +455,19 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
                 dobj_dsol.view(),
                 dobj_dcoord.view(),
             );
-
             // backtracking line search
             let merit_func = |alpha: f64| -> f64 {
                 let mut tmp_mesh = self.mesh.clone();
                 let delta_u_ndarray = Array::from_iter(delta_u.iter().copied());
                 let u_flat = &solutions.flatten() + alpha * &delta_u_ndarray;
                 let u = u_flat.to_shape((nelem, ncell_basis)).unwrap();
-                tmp_mesh.nodes[free_coords[0]].x += alpha * delta_x[0];
+                for (i, &ix) in free_coords.iter().enumerate() {
+                    if ix < nnode {
+                        tmp_mesh.nodes[ix].x += alpha * delta_x[2 * interior_nnodes + i];
+                    } else {
+                        tmp_mesh.nodes[ix - nnode].y += alpha * delta_x[2 * interior_nnodes + i];
+                    }
+                }
                 let mut tmp_res = Array2::zeros((nelem, ncell_basis));
                 self.compute_residuals(&tmp_mesh, u.view(), tmp_res.view_mut(), false);
                 let mut tmp_enr_res = Array2::zeros((nelem, enriched_ncell_basis));
@@ -492,7 +502,11 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
             }
             solutions.scaled_add(alpha, &delta_u.to_shape(solutions.shape()).unwrap());
             for (i, &ix) in free_coords.iter().enumerate() {
-                self.mesh.nodes[ix].x += alpha * delta_x[i];
+                if ix < nnode {
+                    self.mesh.nodes[ix].x += alpha * delta_x[2 * interior_nnodes + i];
+                } else {
+                    self.mesh.nodes[ix - nnode].y += alpha * delta_x[2 * interior_nnodes + i];
+                }
             }
             iter += 1;
         }
@@ -1412,9 +1426,20 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
         jacob_det * normal_magnitude
     }
     pub fn initialize_solution(&mut self, mut solutions: ArrayViewMut2<f64>) {
-        solutions.slice_mut(s![0, ..]).fill(3.0);
+        /*
+        solutions.slice_mut(s![0, ..]).fill(4.0);
+        solutions.slice_mut(s![1, ..]).fill(4.0);
+        solutions.slice_mut(s![2, ..]).fill(0.0);
+        solutions.slice_mut(s![3, ..]).fill(0.0);
+        */
+        solutions.slice_mut(s![0, ..]).fill(2.0);
         solutions.slice_mut(s![1, ..]).fill(2.0);
         solutions.slice_mut(s![2, ..]).fill(1.0);
-        solutions.slice_mut(s![3, ..]).fill(0.0);
+        solutions.slice_mut(s![3, ..]).fill(1.0);
+
+        solutions.slice_mut(s![4, ..]).fill(2.0);
+        solutions.slice_mut(s![5, ..]).fill(2.0);
+        solutions.slice_mut(s![6, ..]).fill(1.0);
+        solutions.slice_mut(s![7, ..]).fill(1.0);
     }
 }

@@ -14,7 +14,7 @@ fn main() {
     let solver_params = initialization::initialize_params_advection();
     let basis = TriangleBasis::new(solver_params.polynomial_order);
     let enriched_basis = TriangleBasis::new(solver_params.polynomial_order + 1);
-    let mut mesh = Mesh2d::create_four_tri_mesh();
+    let mut mesh = Mesh2d::create_eight_tri_mesh();
     let mut solver =
         initialization::initialize_tri_solver(&mut mesh, basis, enriched_basis, &solver_params);
     solver.solve();
