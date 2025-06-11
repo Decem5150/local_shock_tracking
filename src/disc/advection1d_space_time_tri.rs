@@ -1,4 +1,5 @@
 mod flux;
+mod p0solver;
 
 use faer::{Col, Mat, linalg::solvers::DenseSolveCore, mat, prelude::Solve};
 use faer_ext::{IntoFaer, IntoNdarray};
