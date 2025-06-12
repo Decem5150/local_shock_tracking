@@ -277,6 +277,7 @@ impl TriangleBasis {
             }
         }
     }
+    #[allow(non_snake_case)]
     fn calculate_Ak(k_order: f64, alpha: f64, beta: f64) -> f64 {
         if k_order < 1.0 {
             // A_0 is not typically defined via this recurrence.
@@ -307,6 +308,7 @@ impl TriangleBasis {
         }
         ak_val
     }
+    #[allow(non_snake_case)]
     fn jacobi_polynomial(x: ArrayView1<f64>, alpha: f64, beta: f64, n: i32) -> Array1<f64> {
         match n {
             0 => {

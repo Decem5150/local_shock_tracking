@@ -22,9 +22,6 @@ pub struct ShockTrackingParameters {
     pub edge_gp_num: usize,
     pub basis_num: usize,
 }
-pub struct FlowParameters {
-    pub hcr: f64,
-}
 pub struct ShockTrackingSolverQuad<'a> {
     pub solutions: Array<f64, Ix2>,
     pub disc: Disc1dAdvectionSpaceTimeQuad<'a>,

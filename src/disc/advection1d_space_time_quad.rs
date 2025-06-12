@@ -90,9 +90,10 @@ impl<'a> Disc1dAdvectionSpaceTimeQuad<'a> {
     ) -> (Array1<f64>, Array1<f64>) {
         let nelem = self.mesh.elem_num;
         let unenriched_cell_ngp = self.solver_param.cell_gp_num;
-        let free_coords = &self.mesh.free_coords;
+        let free_coords = &self.mesh.free_bnd_x.len() + &self.mesh.free_bnd_y.len();
+        let interior_nnodes = self.mesh.interior_nodes.len();
         let num_u = nelem * unenriched_cell_ngp * unenriched_cell_ngp;
-        let num_x: usize = free_coords.len();
+        let num_x: usize = free_coords + 2 * interior_nnodes;
         let num_lambda = num_u;
         let n_total = num_u + num_x + num_lambda;
 
@@ -148,6 +149,20 @@ impl<'a> Disc1dAdvectionSpaceTimeQuad<'a> {
         let delta_x_ndarray = Array1::from_iter(delta_x.iter().copied());
         (delta_u_ndarray, delta_x_ndarray)
     }
+    fn compute_node_constraints(&self, new_to_old: &Vec<usize>) -> Array2<f64> {
+        let n_nodes = self.mesh.node_num;
+        let total_dofs = 2 * n_nodes;
+
+        let n_free_dofs = new_to_old.len();
+
+        let mut constraint_matrix = Array2::zeros((total_dofs, n_free_dofs));
+
+        for (new_idx, &old_idx) in new_to_old.iter().enumerate() {
+            constraint_matrix[[old_idx, new_idx]] = 1.0;
+        }
+
+        constraint_matrix
+    }
     #[allow(non_snake_case)]
     pub fn solve(&mut self, mut solutions: ArrayViewMut2<f64>) {
         let nelem = self.mesh.elem_num;
@@ -158,11 +173,10 @@ impl<'a> Disc1dAdvectionSpaceTimeQuad<'a> {
         let epsilon2 = 1e-10;
         let max_line_search_iter = 20;
         let max_sqp_iter = 100;
-        let interior_nnodes = self.mesh.interior_node_num;
-        let free_coords = &self.mesh.free_coords;
-        let mut node_constraints: Array2<f64> =
-            Array2::zeros((2 * nnode, 2 * interior_nnodes + free_coords.len()));
-        node_constraints[(4, 0)] = 1.0;
+        let interior_nnodes = self.mesh.interior_nodes.len();
+        let free_coords = &self.mesh.free_bnd_x.len() + &self.mesh.free_bnd_y.len();
+        let (old_to_new, new_to_old) = self.mesh.rearrange_node_dofs();
+        let node_constraints = self.compute_node_constraints(&new_to_old);
 
         let mut residuals: Array2<f64> =
             Array2::zeros((nelem, unenriched_cell_ngp * unenriched_cell_ngp));
@@ -193,7 +207,6 @@ impl<'a> Disc1dAdvectionSpaceTimeQuad<'a> {
             enriched_dx.fill(0.0);
 
             println!("solutions: {:?}", solutions);
-            println!("node: {:?}", self.mesh.nodes[free_coords[0]].x);
             self.compute_residuals_and_derivatives(
                 solutions.view(),
                 residuals.view_mut(),
@@ -257,7 +270,7 @@ impl<'a> Disc1dAdvectionSpaceTimeQuad<'a> {
                 .dot(&enriched_dx.dot(&node_constraints));
             println!("hessian_xx: {:?}", hessian_xx);
             // add an identity matrix to hessian_xx
-            hessian_xx += &(1e-8 * &Array2::eye(2 * interior_nnodes + free_coords.len()));
+            hessian_xx += &(1e-8 * &Array2::eye(2 * interior_nnodes + free_coords));
 
             let (delta_u, delta_x) = self.solve_linear_subproblem(
                 node_constraints.view(),
@@ -281,7 +294,7 @@ impl<'a> Disc1dAdvectionSpaceTimeQuad<'a> {
                 let u = u_flat
                     .to_shape((nelem, unenriched_cell_ngp * unenriched_cell_ngp))
                     .unwrap();
-                tmp_mesh.nodes[free_coords[0]].x += alpha * delta_x[0];
+                tmp_mesh.update_node_coords(&new_to_old, alpha, delta_x.view());
                 let mut tmp_res = Array2::zeros((nelem, unenriched_cell_ngp * unenriched_cell_ngp));
                 self.compute_residuals(&tmp_mesh, u.view(), tmp_res.view_mut(), false);
                 let enriched_u = self.interpolate_to_enriched(u.view());
@@ -319,9 +332,8 @@ impl<'a> Disc1dAdvectionSpaceTimeQuad<'a> {
             }
 
             solutions.scaled_add(alpha, &delta_u.to_shape(solutions.shape()).unwrap());
-            for (i, &ix) in free_coords.iter().enumerate() {
-                self.mesh.nodes[ix].x += alpha * delta_x[i];
-            }
+            self.mesh
+                .update_node_coords(&new_to_old, alpha, delta_x.view());
             iter += 1;
         }
     }

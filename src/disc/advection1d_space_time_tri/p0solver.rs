@@ -1,7 +1,6 @@
-use ndarray::ArrayView2;
+use ndarray::{Array2, ArrayView2, ArrayViewMut2};
 
-use super::basis::triangle::TriangleBasis;
-use super::mesh::mesh2d::Mesh2d;
+use crate::disc::mesh::mesh2d::{Mesh2d, TriangleElement};
 
 pub struct P0Solver<'a> {
     mesh: &'a Mesh2d<TriangleElement>,

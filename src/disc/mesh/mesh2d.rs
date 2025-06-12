@@ -155,10 +155,130 @@ pub struct Mesh2d<T: Element2d> {
     pub flow_out_bnds: Vec<FlowOutBoundary>,
     pub internal_edges: Vec<usize>,
     pub boundary_edges: Vec<usize>,
-    pub free_coords: Vec<usize>,
-    pub interior_node_num: usize,
+    pub free_bnd_x: Vec<usize>,
+    pub free_bnd_y: Vec<usize>,
+    pub interior_nodes: Vec<usize>,
     pub elem_num: usize,
     pub node_num: usize,
+}
+impl<T: Element2d> Mesh2d<T> {
+    pub fn update_node_coords(
+        &mut self,
+        new_to_old: &[usize],
+        alpha: f64,
+        delta_x: ArrayView1<f64>,
+    ) {
+        let n_nodes = self.node_num;
+
+        for (new_idx, &delta_val) in delta_x.indexed_iter() {
+            let old_dof_idx = new_to_old[new_idx];
+            if old_dof_idx < n_nodes {
+                // This is an X-DOF
+                let node_idx = old_dof_idx;
+                self.nodes[node_idx].x += alpha * delta_val;
+            } else {
+                // This is a Y-DOF
+                let node_idx = old_dof_idx - n_nodes;
+                self.nodes[node_idx].y += alpha * delta_val;
+            }
+        }
+    }
+    pub fn rearrange_node_dofs(&self) -> (Vec<usize>, Vec<usize>) {
+        let n_nodes = self.node_num;
+        let total_dofs = 2 * n_nodes;
+
+        let mut boundary_free_x_nodes_sorted = self.free_bnd_x.clone();
+        let mut boundary_free_y_nodes_sorted = self.free_bnd_y.clone();
+        let mut interior_nodes_sorted = self.interior_nodes.clone();
+
+        interior_nodes_sorted.sort();
+        boundary_free_x_nodes_sorted.sort();
+        boundary_free_y_nodes_sorted.sort();
+
+        let num_interior = self.interior_nodes.len();
+        let num_free_bnd_x = boundary_free_x_nodes_sorted.len();
+        let num_free_bnd_y = boundary_free_y_nodes_sorted.len();
+
+        let num_free_dofs = 2 * num_interior + num_free_bnd_x + num_free_bnd_y;
+        let mut old_to_new = vec![num_free_dofs; total_dofs];
+        let mut new_to_old = vec![0; num_free_dofs];
+
+        let mut current_idx = 0;
+
+        // Interior X DOFs
+        for (i, &node_idx) in interior_nodes_sorted.iter().enumerate() {
+            let old_idx = node_idx; // x-dof index is the node index
+            old_to_new[old_idx] = current_idx + i;
+            new_to_old[current_idx + i] = old_idx;
+        }
+        current_idx += num_interior;
+
+        // Interior Y DOFs
+        for (i, &node_idx) in interior_nodes_sorted.iter().enumerate() {
+            let old_idx = n_nodes + node_idx; // y-dof index is offset by n_nodes
+            old_to_new[old_idx] = current_idx + i;
+            new_to_old[current_idx + i] = old_idx;
+        }
+        current_idx += num_interior;
+
+        // Free Boundary X DOFs
+        for (i, &node_idx) in boundary_free_x_nodes_sorted.iter().enumerate() {
+            let old_idx = node_idx;
+            old_to_new[old_idx] = current_idx + i;
+            new_to_old[current_idx + i] = old_idx;
+        }
+        current_idx += num_free_bnd_x;
+
+        // Free Boundary Y DOFs
+        for (i, &node_idx) in boundary_free_y_nodes_sorted.iter().enumerate() {
+            let old_idx = n_nodes + node_idx;
+            old_to_new[old_idx] = current_idx + i;
+            new_to_old[current_idx + i] = old_idx;
+        }
+
+        (old_to_new, new_to_old)
+    }
+    pub fn print_free_node_coords(&self) {
+        use std::collections::BTreeSet;
+
+        let mut free_nodes = BTreeSet::new();
+        self.interior_nodes.iter().for_each(|&n| {
+            free_nodes.insert(n);
+        });
+        self.free_bnd_x.iter().for_each(|&n| {
+            free_nodes.insert(n);
+        });
+        self.free_bnd_y.iter().for_each(|&n| {
+            free_nodes.insert(n);
+        });
+
+        println!("--- Free Node Coordinates ---");
+
+        for &node_idx in free_nodes.iter() {
+            let node = &self.nodes[node_idx];
+            let is_interior = self.interior_nodes.contains(&node_idx);
+            let free_x = is_interior || self.free_bnd_x.contains(&node_idx);
+            let free_y = is_interior || self.free_bnd_y.contains(&node_idx);
+
+            let mut dof_str = Vec::new();
+            if free_x {
+                dof_str.push("X");
+            }
+            if free_y {
+                dof_str.push("Y");
+            }
+
+            println!(
+                "Node {}: ({:.4}, {:.4}) -> Free DOFs: {}",
+                node_idx,
+                node.x,
+                node.y,
+                dof_str.join(", ")
+            );
+        }
+
+        println!("-----------------------------");
+    }
 }
 impl Mesh2d<QuadrilateralElement> {
     pub fn create_two_quad_mesh() -> Mesh2d<QuadrilateralElement> {
@@ -258,8 +378,9 @@ impl Mesh2d<QuadrilateralElement> {
                 ineighbors: vec![0],
             },
         ];
-        let free_coords = vec![4];
-        let interior_node_num = 0;
+        let free_bnd_x = vec![4];
+        let free_bnd_y = vec![];
+        let interior_nodes = vec![];
         let mesh = Mesh2d {
             nodes,
             edges,
@@ -268,8 +389,9 @@ impl Mesh2d<QuadrilateralElement> {
             flow_out_bnds: vec![],
             internal_edges,
             boundary_edges,
-            free_coords,
-            interior_node_num,
+            free_bnd_x,
+            free_bnd_y,
+            interior_nodes,
             elem_num: 2,
             node_num: 6,
         };
@@ -421,8 +543,9 @@ impl Mesh2d<TriangleElement> {
             }
         }
         */
-        let free_coords = vec![4];
-        let interior_node_num = 0;
+        let free_bnd_x = vec![4];
+        let free_bnd_y = vec![];
+        let interior_nodes = vec![];
 
         let mesh = Mesh2d {
             nodes,
@@ -432,8 +555,9 @@ impl Mesh2d<TriangleElement> {
             flow_out_bnds,
             internal_edges,
             boundary_edges,
-            free_coords,
-            interior_node_num,
+            free_bnd_x,
+            free_bnd_y,
+            interior_nodes,
             elem_num: 4,
             node_num: 6,
         };
@@ -662,7 +786,9 @@ impl Mesh2d<TriangleElement> {
                 ineighbors: vec![6, 4],
             },
         ];
-        let free_coords = vec![1, 7, 12, 14];
+        let free_bnd_x = vec![7];
+        let free_bnd_y = vec![3, 5];
+        let interior_nodes = vec![4];
         let mesh = Mesh2d {
             nodes,
             edges,
@@ -671,8 +797,9 @@ impl Mesh2d<TriangleElement> {
             flow_out_bnds,
             internal_edges,
             boundary_edges,
-            free_coords,
-            interior_node_num: 1, // Node 4 is interior
+            free_bnd_x,
+            free_bnd_y,
+            interior_nodes,
             elem_num: 8,
             node_num: 9,
         };
