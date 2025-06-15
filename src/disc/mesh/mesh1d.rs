@@ -1,7 +1,5 @@
 // use crate::disc::burgers1d::boundary_condition::{BoundaryQuantity1d, BoundaryType};
 
-use ndarray::{Array, ArrayView1, Ix1};
-
 // pub struct BoundaryPatch1d {
 //     pub inode: usize,
 //     pub boundary_type: BoundaryType,

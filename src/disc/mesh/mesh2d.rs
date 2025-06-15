@@ -1,6 +1,5 @@
 use super::mesh1d::Node;
-use crate::disc::basis::lagrange1d::{LagrangeBasis1D, LagrangeBasis1DLobatto};
-use ndarray::{Array, Array1, Array2, Array4, ArrayView1, Ix1, Ix2, Ix3, Ix4};
+use ndarray::ArrayView1;
 
 #[derive(Clone, Debug)]
 pub struct FlowInBoundary {
@@ -16,35 +15,8 @@ pub struct Edge {
     pub inodes: Vec<usize>,
     pub parents: Vec<usize>,
     pub local_ids: Vec<usize>,
-    pub ref_normal: [f64; 2],
 }
-impl Edge {
-    pub fn compute_ref_tri_normal(&mut self) {
-        let local_edge_id = self.local_ids[0];
 
-        match local_edge_id {
-            0 => {
-                // Bottom edge: from (0,0) to (1,0)
-                // Outward normal points downward
-                self.ref_normal = [0.0, -1.0];
-            }
-            1 => {
-                // Hypotenuse edge: from (1,0) to (0,1)
-                // Edge vector: (-1, 1), normal: (1, 1) normalized
-                let sqrt2_inv = 1.0 / (2.0_f64.sqrt());
-                self.ref_normal = [sqrt2_inv, sqrt2_inv];
-            }
-            2 => {
-                // Left edge: from (0,1) to (0,0)
-                // Outward normal points leftward
-                self.ref_normal = [-1.0, 0.0];
-            }
-            _ => {
-                panic!("Invalid edge ID");
-            }
-        }
-    }
-}
 pub trait Element2d: std::fmt::Debug {
     fn inodes(&self) -> &[usize];
     fn iedges(&self) -> &[usize];
@@ -325,43 +297,36 @@ impl Mesh2d<QuadrilateralElement> {
                 inodes: vec![0, 1],
                 parents: vec![0],
                 local_ids: vec![0],
-                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![1, 2],
                 parents: vec![1],
                 local_ids: vec![0],
-                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![2, 3],
                 parents: vec![1],
                 local_ids: vec![1],
-                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![3, 4],
                 parents: vec![1],
                 local_ids: vec![2],
-                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![4, 5],
                 parents: vec![0],
                 local_ids: vec![2],
-                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![5, 0],
                 parents: vec![0],
                 local_ids: vec![3],
-                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![1, 4],
                 parents: vec![0, 1],
                 local_ids: vec![1, 3],
-                ref_normal: [0.0, 0.0],
             },
         ];
         let internal_edges = vec![6];
@@ -438,65 +403,53 @@ impl Mesh2d<TriangleElement> {
                 local_ids: vec![2],
             },
         ];
-        let mut edges = vec![
+        let edges = vec![
             Edge {
                 inodes: vec![0, 1],
                 parents: vec![0],
                 local_ids: vec![0],
-                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![1, 2],
                 parents: vec![2],
                 local_ids: vec![0],
-                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![2, 3],
                 parents: vec![2],
                 local_ids: vec![1],
-                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![3, 4],
                 parents: vec![3],
                 local_ids: vec![1],
-                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![4, 5],
                 parents: vec![1],
                 local_ids: vec![1],
-                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![5, 0],
                 parents: vec![1],
                 local_ids: vec![2],
-                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![4, 0], // diagonal edge for left quadrilateral
                 parents: vec![0, 1],
                 local_ids: vec![2, 0],
-                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![3, 1], // diagonal edge for right quadrilateral
                 parents: vec![2, 3],
                 local_ids: vec![2, 0],
-                ref_normal: [0.0, 0.0],
             },
             Edge {
                 inodes: vec![1, 4], // shared edge between triangles
                 parents: vec![0, 3],
                 local_ids: vec![1, 2],
-                ref_normal: [0.0, 0.0],
             },
         ];
-        for edge in edges.iter_mut() {
-            edge.compute_ref_tri_normal();
-        }
         let flow_in_bnds = vec![
             FlowInBoundary {
                 iedges: vec![0, 5],
@@ -621,111 +574,91 @@ impl Mesh2d<TriangleElement> {
             },
         ];
 
-        let mut edges = vec![
+        let edges = vec![
             // Horizontal edges
             Edge {
                 inodes: vec![0, 1],
                 parents: vec![0],
                 local_ids: vec![0],
-                ref_normal: [0.0, 0.0],
             }, // 0
             Edge {
                 inodes: vec![1, 2],
                 parents: vec![2],
                 local_ids: vec![0],
-                ref_normal: [0.0, 0.0],
             }, // 1
             Edge {
-                inodes: vec![3, 4],
+                inodes: vec![4, 3],
                 parents: vec![1, 4],
                 local_ids: vec![1, 0],
-                ref_normal: [0.0, 0.0],
             }, // 2
             Edge {
-                inodes: vec![4, 5],
+                inodes: vec![5, 4],
                 parents: vec![3, 6],
                 local_ids: vec![1, 0],
-                ref_normal: [0.0, 0.0],
             }, // 3
             Edge {
-                inodes: vec![6, 7],
+                inodes: vec![7, 6],
                 parents: vec![5],
                 local_ids: vec![1],
-                ref_normal: [0.0, 0.0],
             }, // 4
             Edge {
-                inodes: vec![7, 8],
+                inodes: vec![8, 7],
                 parents: vec![7],
                 local_ids: vec![1],
-                ref_normal: [0.0, 0.0],
             }, // 5
             // Vertical edges
             Edge {
-                inodes: vec![0, 3],
+                inodes: vec![3, 0],
                 parents: vec![1],
                 local_ids: vec![2],
-                ref_normal: [0.0, 0.0],
             }, // 6
             Edge {
                 inodes: vec![1, 4],
                 parents: vec![0, 3],
                 local_ids: vec![1, 2],
-                ref_normal: [0.0, 0.0],
             }, // 7
             Edge {
                 inodes: vec![2, 5],
                 parents: vec![2],
                 local_ids: vec![1],
-                ref_normal: [0.0, 0.0],
             }, // 8
             Edge {
-                inodes: vec![3, 6],
+                inodes: vec![6, 3],
                 parents: vec![5],
                 local_ids: vec![2],
-                ref_normal: [0.0, 0.0],
             }, // 9
             Edge {
                 inodes: vec![4, 7],
                 parents: vec![4, 7],
                 local_ids: vec![1, 2],
-                ref_normal: [0.0, 0.0],
             }, // 10
             Edge {
                 inodes: vec![5, 8],
                 parents: vec![6],
                 local_ids: vec![1],
-                ref_normal: [0.0, 0.0],
             }, // 11
             // Diagonal edges
             Edge {
-                inodes: vec![0, 4],
+                inodes: vec![4, 0],
                 parents: vec![0, 1],
                 local_ids: vec![2, 0],
-                ref_normal: [0.0, 0.0],
             }, // 12
             Edge {
-                inodes: vec![1, 5],
+                inodes: vec![5, 1],
                 parents: vec![2, 3],
                 local_ids: vec![2, 0],
-                ref_normal: [0.0, 0.0],
             }, // 13
             Edge {
-                inodes: vec![3, 7],
+                inodes: vec![7, 3],
                 parents: vec![4, 5],
                 local_ids: vec![2, 0],
-                ref_normal: [0.0, 0.0],
             }, // 14
             Edge {
-                inodes: vec![4, 8],
+                inodes: vec![8, 4],
                 parents: vec![6, 7],
                 local_ids: vec![2, 0],
-                ref_normal: [0.0, 0.0],
             }, // 15
         ];
-
-        for edge in edges.iter_mut() {
-            edge.compute_ref_tri_normal();
-        }
 
         let flow_in_bnds = vec![
             FlowInBoundary {
@@ -804,5 +737,197 @@ impl Mesh2d<TriangleElement> {
             node_num: 9,
         };
         mesh
+    }
+    pub fn create_tri_mesh(n_nodes_per_dim: usize) -> Mesh2d<TriangleElement> {
+        let node_num = n_nodes_per_dim * n_nodes_per_dim;
+        let mut nodes = Vec::with_capacity(node_num);
+        for i in 0..n_nodes_per_dim {
+            for j in 0..n_nodes_per_dim {
+                nodes.push(Node {
+                    x: j as f64,
+                    y: i as f64,
+                    parents: Vec::new(),
+                    local_ids: Vec::new(),
+                });
+            }
+        }
+
+        let n_quads_per_dim = n_nodes_per_dim - 1;
+        let elem_num = 2 * n_quads_per_dim * n_quads_per_dim;
+        let mut elements = Vec::with_capacity(elem_num);
+
+        for i in 0..n_quads_per_dim {
+            for j in 0..n_quads_per_dim {
+                let bl = i * n_nodes_per_dim + j;
+                let br = i * n_nodes_per_dim + j + 1;
+                let tl = (i + 1) * n_nodes_per_dim + j;
+                let tr = (i + 1) * n_nodes_per_dim + j + 1;
+
+                elements.push(TriangleElement {
+                    inodes: [bl, br, tr],
+                    iedges: [0; 3],
+                    ineighbors: vec![],
+                });
+                elements.push(TriangleElement {
+                    inodes: [bl, tr, tl],
+                    iedges: [0; 3],
+                    ineighbors: vec![],
+                });
+            }
+        }
+
+        for (elem_idx, element) in elements.iter().enumerate() {
+            for (local_id, &inode) in element.inodes.iter().enumerate() {
+                nodes[inode].parents.push(elem_idx);
+                nodes[inode].local_ids.push(local_id);
+            }
+        }
+
+        let mut edges = Vec::new();
+        let mut edge_map = std::collections::HashMap::new();
+        for (elem_idx, element) in elements.iter_mut().enumerate() {
+            let n = element.inodes;
+            let element_edges_nodes = [(n[0], n[1]), (n[1], n[2]), (n[2], n[0])];
+
+            for (local_id, &(n1, n2)) in element_edges_nodes.iter().enumerate() {
+                let key = (n1.min(n2), n1.max(n2));
+                let edge_idx = *edge_map.entry(key).or_insert_with(|| {
+                    let new_edge_idx = edges.len();
+                    edges.push(Edge {
+                        inodes: vec![n1, n2],
+                        parents: Vec::new(),
+                        local_ids: Vec::new(),
+                    });
+                    new_edge_idx
+                });
+
+                element.iedges[local_id] = edge_idx;
+
+                edges[edge_idx].parents.push(elem_idx);
+                edges[edge_idx].local_ids.push(local_id);
+            }
+        }
+
+        for (elem_idx, element) in elements.iter().enumerate() {
+            for (local_id, &inode) in element.inodes.iter().enumerate() {
+                nodes[inode].parents.push(elem_idx);
+                nodes[inode].local_ids.push(local_id);
+            }
+        }
+
+        for (elem_idx, element) in elements.clone().iter().enumerate() {
+            let mut neighbors = Vec::new();
+            for &iedge in &element.iedges {
+                for &parent_elem in &edges[iedge].parents {
+                    if parent_elem != elem_idx {
+                        neighbors.push(parent_elem);
+                    }
+                }
+            }
+            elements[elem_idx].ineighbors = neighbors;
+        }
+
+        let boundary_edges: Vec<usize> = (0..edges.len())
+            .filter(|&i| edges[i].parents.len() == 1)
+            .collect();
+        let internal_edges: Vec<usize> = (0..edges.len())
+            .filter(|&i| edges[i].parents.len() == 2)
+            .collect();
+
+        let mut top_edges = Vec::new();
+        for j in 0..n_nodes_per_dim - 1 {
+            let n1 = (n_nodes_per_dim - 1) * n_nodes_per_dim + j;
+            let n2 = (n_nodes_per_dim - 1) * n_nodes_per_dim + j + 1;
+            top_edges.push(*edge_map.get(&(n1.min(n2), n1.max(n2))).unwrap());
+        }
+
+        let mut right_edges = Vec::new();
+        for i in 0..n_nodes_per_dim - 1 {
+            let n1 = i * n_nodes_per_dim + (n_nodes_per_dim - 1);
+            let n2 = (i + 1) * n_nodes_per_dim + (n_nodes_per_dim - 1);
+            right_edges.push(*edge_map.get(&(n1.min(n2), n1.max(n2))).unwrap());
+        }
+
+        let flow_out_bnds = vec![FlowOutBoundary {
+            iedges: [top_edges, right_edges].concat(),
+        }];
+
+        let mut left_edges = Vec::new();
+        for i in 0..n_nodes_per_dim - 1 {
+            let n1 = i * n_nodes_per_dim;
+            let n2 = (i + 1) * n_nodes_per_dim;
+            left_edges.push(*edge_map.get(&(n1.min(n2), n1.max(n2))).unwrap());
+        }
+
+        let n_segments_bottom = n_nodes_per_dim - 1;
+        let split_idx = n_segments_bottom / 2;
+
+        let mut bottom_edges_left = Vec::new();
+        for j in 0..split_idx {
+            let n1 = j;
+            let n2 = j + 1;
+            bottom_edges_left.push(*edge_map.get(&(n1.min(n2), n1.max(n2))).unwrap());
+        }
+
+        let mut bottom_edges_right = Vec::new();
+        for j in split_idx..n_segments_bottom {
+            let n1 = j;
+            let n2 = j + 1;
+            bottom_edges_right.push(*edge_map.get(&(n1.min(n2), n1.max(n2))).unwrap());
+        }
+
+        let mut flow_in_bnds = Vec::new();
+        let mut flow_in_edges_val2 = left_edges;
+        flow_in_edges_val2.extend(bottom_edges_left);
+
+        if !flow_in_edges_val2.is_empty() {
+            flow_in_bnds.push(FlowInBoundary {
+                iedges: flow_in_edges_val2,
+                value: 2.0,
+            });
+        }
+        if !bottom_edges_right.is_empty() {
+            flow_in_bnds.push(FlowInBoundary {
+                iedges: bottom_edges_right,
+                value: -1.0,
+            });
+        }
+
+        let mut interior_nodes = Vec::new();
+        for i in 1..n_nodes_per_dim - 1 {
+            for j in 1..n_nodes_per_dim - 1 {
+                interior_nodes.push(i * n_nodes_per_dim + j);
+            }
+        }
+
+        let mut free_bnd_x = Vec::new();
+        for j in 1..n_nodes_per_dim - 1 {
+            // Bottom boundary
+            free_bnd_x.push(j);
+            // Top boundary
+            free_bnd_x.push((n_nodes_per_dim - 1) * n_nodes_per_dim + j);
+        }
+
+        let mut free_bnd_y = Vec::new();
+        for i in 1..n_nodes_per_dim - 1 {
+            // Left boundary
+            free_bnd_y.push(i * n_nodes_per_dim);
+            // Right boundary
+            free_bnd_y.push(i * n_nodes_per_dim + (n_nodes_per_dim - 1));
+        }
+        Mesh2d {
+            nodes,
+            edges,
+            elements,
+            flow_in_bnds,
+            flow_out_bnds,
+            internal_edges,
+            boundary_edges,
+            free_bnd_x,
+            free_bnd_y,
+            interior_nodes,
+            elem_num,
+            node_num,
+        }
     }
 }

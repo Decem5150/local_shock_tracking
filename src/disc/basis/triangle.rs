@@ -268,7 +268,6 @@ impl TriangleBasis {
                 let (x_interior, _) =
                     Self::jacobi_gauss_quadrature(alpha + 1.0, beta + 1.0, n_order - 2);
                 let mut x_lobatto = Array1::<f64>::zeros(n_order + 1);
-                let mut w_lobatto = Array1::<f64>::zeros(n_order + 1);
 
                 x_lobatto[0] = -1.0;
                 x_lobatto[n_order] = 1.0;
@@ -913,7 +912,6 @@ impl TriangleBasis {
         let (a, b) = Self::rs_to_ab(self.r.view(), self.s.view());
         let mut dubiner_test_passed = true;
 
-        let mut sk = 0;
         for i in 0..=n {
             for j in 0..=(n - i) {
                 // Create the Dubiner basis function
@@ -944,7 +942,6 @@ impl TriangleBasis {
                     dubiner_test_passed = false;
                     all_tests_passed = false;
                 }
-                sk += 1;
             }
         }
 

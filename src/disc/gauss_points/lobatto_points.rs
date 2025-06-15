@@ -1,5 +1,3 @@
-use ndarray::{Array, Ix1, array};
-
 pub fn get_lobatto_points_interval(points_num: usize) -> (Vec<f64>, Vec<f64>) {
     let (gauss_points, gauss_weights) = match points_num {
         3 => {

@@ -1,13 +1,12 @@
 use crate::disc::{
+    SQP, SpaceTimeSolver1DScalar,
     advection1d_space_time_quad::Disc1dAdvectionSpaceTimeQuad,
     advection1d_space_time_tri::Disc1dAdvectionSpaceTimeTri,
     basis::{lagrange1d::LagrangeBasis1DLobatto, triangle::TriangleBasis},
-    mesh::{
-        mesh1d::Mesh1d,
-        mesh2d::{Mesh2d, QuadrilateralElement, TriangleElement},
-    },
+    burgers1d_space_time::Disc1dBurgers1dSpaceTime,
+    mesh::mesh2d::{Mesh2d, QuadrilateralElement, TriangleElement},
 };
-use ndarray::{Array, Array3, Ix2, Ix3};
+use ndarray::{Array, Ix2};
 
 pub struct SolverParameters {
     pub cfl: f64,
@@ -51,12 +50,12 @@ impl<'a> ShockTrackingSolverQuad<'a> {
         self.disc.solve(self.solutions.view_mut());
     }
 }
-pub struct ShockTrackingSolverTri<'a> {
+pub struct ShockTrackingSolverTri<'a, T: SpaceTimeSolver1DScalar + SQP> {
     pub solutions: Array<f64, Ix2>,
-    pub disc: Disc1dAdvectionSpaceTimeTri<'a>,
+    pub disc: T,
     pub solver_params: &'a SolverParameters,
 }
-impl<'a> ShockTrackingSolverTri<'a> {
+impl<'a> ShockTrackingSolverTri<'a, Disc1dAdvectionSpaceTimeTri<'a>> {
     pub fn new(
         basis: TriangleBasis,
         enriched_basis: TriangleBasis,
@@ -72,6 +71,25 @@ impl<'a> ShockTrackingSolverTri<'a> {
             solver_params,
         }
     }
+}
+impl<'a> ShockTrackingSolverTri<'a, Disc1dBurgers1dSpaceTime<'a>> {
+    pub fn new(
+        basis: TriangleBasis,
+        enriched_basis: TriangleBasis,
+        mesh: &'a mut Mesh2d<TriangleElement>,
+        solver_params: &'a SolverParameters,
+    ) -> Self {
+        let n = solver_params.polynomial_order;
+        let solutions = Array::zeros((mesh.elem_num, (n + 1) * (n + 2) / 2));
+        let disc = Disc1dBurgers1dSpaceTime::new(basis, enriched_basis, mesh, solver_params);
+        Self {
+            solutions,
+            disc,
+            solver_params,
+        }
+    }
+}
+impl<'a, T: SpaceTimeSolver1DScalar + SQP> ShockTrackingSolverTri<'a, T> {
     pub fn solve(&mut self) {
         self.disc.initialize_solution(self.solutions.view_mut());
         self.disc.solve(self.solutions.view_mut());

@@ -2,20 +2,22 @@ use ndarray::Array3;
 
 use crate::{
     disc::{
+        advection1d_space_time_tri::Disc1dAdvectionSpaceTimeTri,
         basis::{
             lagrange1d::{LagrangeBasis1D, LagrangeBasis1DLobatto},
             triangle::TriangleBasis,
         },
+        burgers1d_space_time::Disc1dBurgers1dSpaceTime,
         mesh::{
             mesh1d::Mesh1d,
             mesh2d::{Mesh2d, QuadrilateralElement, TriangleElement},
         },
     },
     io::params_parser::SolverParamParser,
-    solver::{FlowParameters, ShockTrackingSolverQuad, ShockTrackingSolverTri, SolverParameters},
+    solver::{ShockTrackingSolverQuad, ShockTrackingSolverTri, SolverParameters},
 };
 
-pub fn initialize_params() -> (FlowParameters, SolverParameters) {
+pub fn initialize_params() -> SolverParameters {
     let solver_param_parser = SolverParamParser::parse("inputs/solverparam.json");
     let polynomial_order = solver_param_parser.polynomial_order;
     let cell_gp_num = polynomial_order + 1;
@@ -27,8 +29,8 @@ pub fn initialize_params() -> (FlowParameters, SolverParameters) {
         cell_gp_num,
         equation_num: 1,
     };
-    let flow_params = FlowParameters { hcr: 1.4 };
-    (flow_params, solver_params)
+
+    solver_params
 }
 pub fn initialize_params_advection() -> SolverParameters {
     let polynomial_order = 3;
@@ -69,7 +71,12 @@ pub fn initialize_tri_solver<'a>(
     basis: TriangleBasis,
     enriched_basis: TriangleBasis,
     solver_param: &'a SolverParameters,
-) -> ShockTrackingSolverTri<'a> {
-    let solver = ShockTrackingSolverTri::new(basis, enriched_basis, mesh, solver_param);
+) -> ShockTrackingSolverTri<'a, Disc1dBurgers1dSpaceTime<'a>> {
+    let solver = ShockTrackingSolverTri::<Disc1dBurgers1dSpaceTime>::new(
+        basis,
+        enriched_basis,
+        mesh,
+        solver_param,
+    );
     solver
 }

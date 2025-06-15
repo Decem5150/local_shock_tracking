@@ -1,6 +1,6 @@
 mod flux;
 
-use faer::{Col, Mat, linalg::solvers::DenseSolveCore, mat, prelude::Solve};
+use faer::{Col, linalg::solvers::DenseSolveCore, prelude::Solve};
 use faer_ext::{IntoFaer, IntoNdarray};
 use flux::space_time_flux1d;
 use ndarray::{Array, Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, array, s};
