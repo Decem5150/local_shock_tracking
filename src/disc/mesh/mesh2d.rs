@@ -889,7 +889,7 @@ impl Mesh2d<TriangleElement> {
         if !bottom_edges_right.is_empty() {
             flow_in_bnds.push(FlowInBoundary {
                 iedges: bottom_edges_right,
-                value: -1.0,
+                value: 1.0,
             });
         }
 
