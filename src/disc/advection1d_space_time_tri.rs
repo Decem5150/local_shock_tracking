@@ -4,7 +4,7 @@ use std::autodiff::autodiff_reverse;
 
 use super::Geometric;
 use super::{
-    basis::triangle::TriangleBasis,
+    basis::{Basis, triangle::TriangleBasis},
     mesh::mesh2d::{Mesh2d, TriangleElement},
 };
 use crate::disc::{P0Solver, SQP, SpaceTimeSolver1DScalar};

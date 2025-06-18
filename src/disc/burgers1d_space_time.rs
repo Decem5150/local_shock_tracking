@@ -3,7 +3,7 @@ use ndarray_linalg::Inverse;
 use std::autodiff::autodiff_reverse;
 
 use super::{
-    basis::triangle::TriangleBasis,
+    basis::{Basis, triangle::TriangleBasis},
     mesh::mesh2d::{Mesh2d, TriangleElement},
 };
 use crate::{
