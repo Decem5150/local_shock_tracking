@@ -7,12 +7,12 @@ use crate::disc::basis::lagrange1d::LagrangeBasis1DLobatto;
 use crate::disc::gauss_points::lobatto_points::get_lobatto_points_interval;
 
 pub struct QuadrilateralBasis {
-    pub r: Array1<f64>,
-    pub s: Array1<f64>,
+    pub xi: Array1<f64>,
+    pub eta: Array1<f64>,
     pub vandermonde: Array2<f64>,
     pub inv_vandermonde: Array2<f64>,
-    pub dr: Array2<f64>,
-    pub ds: Array2<f64>,
+    pub dxi: Array2<f64>,
+    pub deta: Array2<f64>,
     pub nodes_along_edges: Array2<usize>,
     pub quad_p: Array1<f64>,
     pub quad_w: Array1<f64>,
@@ -20,21 +20,22 @@ pub struct QuadrilateralBasis {
 
 impl QuadrilateralBasis {
     pub fn new(n: usize) -> Self {
-        let (r, s) = Self::nodes2d(n);
-        let vandermonde = Self::vandermonde2d(n, r.view(), s.view());
+        let (xi, eta) = Self::nodes2d(n);
+        let vandermonde = Self::vandermonde2d(n, xi.view(), eta.view());
         let inv_vandermonde = vandermonde.inv().unwrap();
-        let (dr, ds) = Self::dmatrices_2d(n, r.view(), s.view(), vandermonde.view());
+        let (dxi, deta) = Self::dmatrices_2d(n, xi.view(), eta.view(), vandermonde.view());
         let nodes_along_edges = Self::set_nodes_along_edges(n);
-        let quad_p = Self::jacobi_gauss_lobatto(0.0, 0.0, n);
+        let quad_p_gl = Self::jacobi_gauss_lobatto(0.0, 0.0, n);
+        let quad_p = quad_p_gl.mapv(|val| (val + 1.0) / 2.0);
         let (_, quad_w_vec) = get_lobatto_points_interval(n + 1);
-        let quad_w = Array1::from(quad_w_vec);
+        let quad_w = Array1::from(quad_w_vec).mapv(|v| v / 2.0);
         Self {
-            r,
-            s,
+            xi,
+            eta,
             vandermonde,
             inv_vandermonde,
-            dr,
-            ds,
+            dxi,
+            deta,
             nodes_along_edges,
             quad_p,
             quad_w,
@@ -42,8 +43,10 @@ impl QuadrilateralBasis {
     }
 
     fn ortho_basis_ij(r: ArrayView1<f64>, s: ArrayView1<f64>, i: i32, j: i32) -> Array1<f64> {
-        let p_i_r = Self::jacobi_polynomial(r, 0.0, 0.0, i);
-        let p_j_s = Self::jacobi_polynomial(s, 0.0, 0.0, j);
+        let r_map = r.mapv(|x| 2. * x - 1.);
+        let s_map = s.mapv(|x| 2. * x - 1.);
+        let p_i_r = Self::jacobi_polynomial(r_map.view(), 0.0, 0.0, i);
+        let p_j_s = Self::jacobi_polynomial(s_map.view(), 0.0, 0.0, j);
         &p_i_r * &p_j_s
     }
     fn set_nodes_along_edges(n: usize) -> Array2<usize> {
@@ -98,20 +101,21 @@ impl Basis for QuadrilateralBasis {
     fn nodes2d(n: usize) -> (Array1<f64>, Array1<f64>) {
         let n_pts_1d = n + 1;
         let n_pts_2d = n_pts_1d * n_pts_1d;
-        let mut r = Array1::<f64>::zeros(n_pts_2d);
-        let mut s = Array1::<f64>::zeros(n_pts_2d);
+        let mut xi = Array1::<f64>::zeros(n_pts_2d);
+        let mut eta = Array1::<f64>::zeros(n_pts_2d);
 
-        let zeta = Self::jacobi_gauss_lobatto(0.0, 0.0, n);
+        let zeta_gl = Self::jacobi_gauss_lobatto(0.0, 0.0, n);
+        let zeta = zeta_gl.mapv(|val| (val + 1.0) / 2.0);
 
         let mut sk = 0;
         for i in 0..n_pts_1d {
             for j in 0..n_pts_1d {
-                r[sk] = zeta[j];
-                s[sk] = zeta[i];
+                xi[sk] = zeta[j];
+                eta[sk] = zeta[i];
                 sk += 1;
             }
         }
-        (r, s)
+        (xi, eta)
     }
     fn grad_vandermonde_2d(
         n: usize,
@@ -124,14 +128,19 @@ impl Basis for QuadrilateralBasis {
         let mut vr = Array2::zeros((num_points, n_basis_2d));
         let mut vs = Array2::zeros((num_points, n_basis_2d));
 
+        let r_map = r.mapv(|x| 2. * x - 1.);
+        let s_map = s.mapv(|x| 2. * x - 1.);
+
         let mut sk = 0;
         for i in 0..n_basis_1d {
             for j in 0..n_basis_1d {
-                let p_i_r = Self::jacobi_polynomial(r, 0.0, 0.0, i as i32);
-                let dp_i_r = Self::grad_jacobi_polynomial(r, 0.0, 0.0, i as i32);
+                let p_i_r = Self::jacobi_polynomial(r_map.view(), 0.0, 0.0, i as i32);
+                let mut dp_i_r = Self::grad_jacobi_polynomial(r_map.view(), 0.0, 0.0, i as i32);
+                dp_i_r.mapv_inplace(|val| val * 2.0);
 
-                let p_j_s = Self::jacobi_polynomial(s, 0.0, 0.0, j as i32);
-                let dp_j_s = Self::grad_jacobi_polynomial(s, 0.0, 0.0, j as i32);
+                let p_j_s = Self::jacobi_polynomial(s_map.view(), 0.0, 0.0, j as i32);
+                let mut dp_j_s = Self::grad_jacobi_polynomial(s_map.view(), 0.0, 0.0, j as i32);
+                dp_j_s.mapv_inplace(|val| val * 2.0);
 
                 vr.column_mut(sk).assign(&(&dp_i_r * &p_j_s));
                 vs.column_mut(sk).assign(&(&p_i_r * &dp_j_s));

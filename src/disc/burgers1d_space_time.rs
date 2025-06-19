@@ -7,7 +7,7 @@ use super::{
     mesh::mesh2d::{Mesh2d, TriangleElement},
 };
 use crate::{
-    disc::{Geometric, P0Solver, SQP, SpaceTimeSolver1DScalar},
+    disc::{Geometric2D, P0Solver, SQP, SpaceTimeSolver1DScalar},
     solver::SolverParameters,
 };
 
@@ -225,5 +225,5 @@ impl P0Solver for Disc1dBurgers1dSpaceTime<'_> {
         dts
     }
 }
-impl Geometric for Disc1dBurgers1dSpaceTime<'_> {}
+impl Geometric2D for Disc1dBurgers1dSpaceTime<'_> {}
 impl SQP for Disc1dBurgers1dSpaceTime<'_> {}

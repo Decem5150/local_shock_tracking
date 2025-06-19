@@ -8,15 +8,12 @@ use super::{
     basis::lagrange1d::LagrangeBasis1DLobatto,
     mesh::mesh1d::{Element1d, Mesh1d},
 };
-use crate::{
-    io::write_to_csv::write_to_csv,
-    solver::{FlowParameters, SolverParameters},
-};
+use crate::{io::write_to_csv::write_to_csv, solver::SolverParameters};
 use boundary_condition::{BoundaryQuantity1d, BoundaryType};
 use flux::flux1d;
 use ndarray::{
     Array1, Array2, Array3, Array4, ArrayView1, ArrayView2, ArrayView3, ArrayView4, ArrayViewMut2,
-    ArrayViewMut3, ArrayViewMut4, s,
+    ArrayViewMut3, s,
 };
 use riemann_solver::rusanov::rusanov;
 
@@ -25,7 +22,6 @@ pub struct Disc1dBurgers<'a> {
     pub current_step: usize,
     pub basis: LagrangeBasis1DLobatto,
     mesh: &'a Mesh1d,
-    flow_param: &'a FlowParameters,
     solver_param: &'a SolverParameters,
     ss_m_mat: Array2<f64>,     // mass matrix of two space polynomials
     ss_im_mat: Array2<f64>,    // inverse mass matrix of two space polynomials
@@ -40,7 +36,6 @@ impl<'a> Disc1dBurgers<'a> {
     pub fn new(
         basis: LagrangeBasis1DLobatto,
         mesh: &'a Mesh1d,
-        flow_param: &'a FlowParameters,
         solver_param: &'a SolverParameters,
     ) -> Disc1dBurgers<'a> {
         let cell_ngp = solver_param.cell_gp_num;
@@ -57,7 +52,6 @@ impl<'a> Disc1dBurgers<'a> {
             current_step: 0,
             basis,
             mesh,
-            flow_param,
             solver_param,
             ss_m_mat,
             ss_im_mat,

@@ -2,7 +2,7 @@ use ndarray::{Array1, Array2, ArrayView2, ArrayViewMut2, s};
 use ndarray_linalg::Inverse;
 use std::autodiff::autodiff_reverse;
 
-use super::Geometric;
+use super::Geometric2D;
 use super::{
     basis::{Basis, triangle::TriangleBasis},
     mesh::mesh2d::{Mesh2d, TriangleElement},
@@ -299,4 +299,4 @@ impl P0Solver for Disc1dAdvectionSpaceTimeTri<'_> {
     }
 }
 impl SQP for Disc1dAdvectionSpaceTimeTri<'_> {}
-impl Geometric for Disc1dAdvectionSpaceTimeTri<'_> {}
+impl Geometric2D for Disc1dAdvectionSpaceTimeTri<'_> {}
