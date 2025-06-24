@@ -663,11 +663,11 @@ impl Mesh2d<TriangleElement> {
         let flow_in_bnds = vec![
             FlowInBoundary {
                 iedges: vec![0, 6, 9],
-                value: 2.0,
+                value: 1.0,
             },
             FlowInBoundary {
                 iedges: vec![1],
-                value: 1.0,
+                value: 2.0,
             },
         ];
         let flow_out_bnds = vec![FlowOutBoundary {

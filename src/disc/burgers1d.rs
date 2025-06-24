@@ -1,71 +1,65 @@
 pub mod boundary_condition;
 mod cell_shock_detector;
 mod flux;
-mod precompute_matrix;
 mod riemann_solver;
 // mod shock_tracking;
 use super::{
     basis::lagrange1d::LagrangeBasis1DLobatto,
     mesh::mesh1d::{Element1d, Mesh1d},
 };
+use crate::disc::ader::{ADER1DMatrices, ADER1DScalar};
+use crate::disc::basis::quadrilateral::QuadrilateralBasis;
+use crate::disc::geometric::Geometric1D;
 use crate::{io::write_to_csv::write_to_csv, solver::SolverParameters};
-use boundary_condition::{BoundaryQuantity1d, BoundaryType};
+use boundary_condition::BoundaryType;
 use flux::flux1d;
 use ndarray::{
     Array1, Array2, Array3, Array4, ArrayView1, ArrayView2, ArrayView3, ArrayView4, ArrayViewMut2,
     ArrayViewMut3, s,
 };
+use ndarray_linalg::Inverse;
 use riemann_solver::rusanov::rusanov;
 
 pub struct Disc1dBurgers<'a> {
     pub current_time: f64,
     pub current_step: usize,
-    pub basis: LagrangeBasis1DLobatto,
+    pub space_basis: LagrangeBasis1DLobatto,
+    pub space_time_basis: QuadrilateralBasis,
     mesh: &'a Mesh1d,
     solver_param: &'a SolverParameters,
-    ss_m_mat: Array2<f64>,     // mass matrix of two space polynomials
-    ss_im_mat: Array2<f64>,    // inverse mass matrix of two space polynomials
-    sst_kxi_mat: Array2<f64>, // spatial stiffness matrix of space polynomial and space-time polynomial
-    stst_m_mat: Array2<f64>,  // mass matrix of two space-time polynomials
-    stst_im_mat: Array2<f64>, // inverse mass matrix of two space-time polynomials
-    stst_kxi_mat: Array2<f64>, // spatial stiffness matrix of two space-time polynomials
-    stst_ik1_mat: Array2<f64>, // inverse temporal stiffness matrix of two space-time polynomials
-    sts_f0_mat: Array2<f64>,  // mass matrix at relative time 0 for two space-time polynomials
+    space_im_mat: Array2<f64>,
+    space_time_im_mat: Array2<f64>,
+    kxi_mat: Array2<f64>,
+    ik1_mat: Array2<f64>,
+    f0_mat: Array2<f64>,
 }
 impl<'a> Disc1dBurgers<'a> {
     pub fn new(
-        basis: LagrangeBasis1DLobatto,
+        space_basis: LagrangeBasis1DLobatto,
+        space_time_basis: QuadrilateralBasis,
         mesh: &'a Mesh1d,
         solver_param: &'a SolverParameters,
     ) -> Disc1dBurgers<'a> {
-        let cell_ngp = solver_param.cell_gp_num;
-        let ss_m_mat: Array2<f64> = Array2::zeros((cell_ngp, cell_ngp));
-        let ss_im_mat: Array2<f64> = Array2::zeros((cell_ngp, cell_ngp));
-        let sst_kxi_mat: Array2<f64> = Array2::zeros((cell_ngp, cell_ngp * cell_ngp));
-        let stst_m_mat: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp));
-        let stst_im_mat: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp));
-        let stst_kxi_mat: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp));
-        let stst_ik1_mat: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp));
-        let sts_f0_mat: Array2<f64> = Array2::zeros((cell_ngp * cell_ngp, cell_ngp));
-        let mut disc = Disc1dBurgers {
+        let space_m_mat = Self::compute_space_mass_mat(&space_time_basis);
+        let space_im_mat = space_m_mat.inv().unwrap();
+        let space_time_m_mat = Self::compute_space_time_mass_mat(&space_time_basis);
+        let space_time_im_mat = space_time_m_mat.inv().unwrap();
+        let kxi_mat = Self::compute_kxi_mat(&space_time_basis, space_m_mat.view());
+        let ik1_mat = Self::compute_ik1_mat(&space_time_basis, space_time_m_mat.view());
+        let f0_mat = Self::compute_f0_mat(&space_time_basis);
+        let disc = Disc1dBurgers {
             current_time: 0.0,
             current_step: 0,
-            basis,
+            space_basis,
+            space_time_basis,
             mesh,
             solver_param,
-            ss_m_mat,
-            ss_im_mat,
-            sst_kxi_mat,
-            stst_m_mat,
-            stst_im_mat,
-            stst_kxi_mat,
-            stst_ik1_mat,
-            sts_f0_mat,
+            space_im_mat,
+            space_time_im_mat,
+            kxi_mat,
+            ik1_mat,
+            f0_mat,
         };
-        disc.compute_m_mat();
-        disc.compute_kxi_mat();
-        disc.compute_ik1_mat();
-        disc.compute_f0_mat();
         /*
         dbg!(&disc.ss_m_mat);
         dbg!(&disc.ss_im_mat);
@@ -81,11 +75,12 @@ impl<'a> Disc1dBurgers<'a> {
     pub fn solve(&mut self, mut solutions: ArrayViewMut3<f64>) {
         let nelem = self.mesh.elem_num;
         let nnode = self.mesh.node_num;
-        let cell_ngp = self.solver_param.cell_gp_num;
-        let mut residuals: Array3<f64> = Array3::zeros((nelem, cell_ngp, 1));
+        let space_time_ndof = self.basis.xi.len();
+        let space_ndof = self.basis.xi.len().isqrt();
+        let mut residuals: Array3<f64> = Array3::zeros((nelem, space_ndof, 1));
         let mut old_solutions: Array3<f64> = solutions.to_owned();
         // let bnd_lqh: Array4<f64> = Array4::zeros((nelem, 2, cell_ngp, 1));
-        let mut lqh: Array4<f64> = Array4::zeros((nelem, cell_ngp, cell_ngp, 1));
+        let mut lqh = Array3::zeros((nelem, space_time_ndof, 1));
         write_to_csv(
             solutions.view(),
             self.mesh,
@@ -288,77 +283,55 @@ impl<'a> Disc1dBurgers<'a> {
     }
     fn local_space_time_predictor(
         &mut self,
-        mut lqh: ArrayViewMut3<f64>, // (cell_ngp, cell_ngp, neq)
+        mut lqh: ArrayViewMut2<f64>, // (cell_ngp, cell_ngp, neq)
         sol: ArrayView2<f64>,        // (ndof, neq)
         elem: &Element1d,
         dt: f64,
     ) {
-        let cell_ngp = self.solver_param.cell_gp_num;
-        let jacob_det = elem.jacob_det;
+        let ndof = self.space_time_basis.xi.len();
+        let x: [f64; 2] = std::array::from_fn(|i| self.mesh.nodes[elem.inodes[i]].x);
+        let jacob_det = Self::compute_interval_length(&x);
         // Dimensions: (time, x, var) for better memory access in Rust
-        let mut lfh: Array3<f64> = Array3::zeros((cell_ngp, cell_ngp, 1)); // flux tensor
+        let mut lfh = Array2::zeros((ndof, 1)); // flux tensor
 
         // Initial guess for current element
-        for kgp in 0..cell_ngp {
-            // time
-            for igp in 0..cell_ngp {
-                // x
-                for ivar in 0..1 {
-                    lqh[[kgp, igp, ivar]] = sol[[igp, ivar]];
-                }
-            }
+        for idof in 0..ndof {
+            lqh[(idof, 0)] = sol[(idof, 0)];
         }
 
         // Picard iterations for current element
         for _iter in 0..self.solver_param.polynomial_order + 1 {
             // Compute fluxes
-            for kgp in 0..cell_ngp {
-                // time
-                for igp in 0..cell_ngp {
-                    // x
-                    let f: Array1<f64> = flux1d(lqh.slice(s![kgp, igp, ..]));
-                    lfh.slice_mut(s![kgp, igp, ..])
-                        .assign(&(dt * &f / jacob_det));
-                }
+            for idof in 0..ndof {
+                let f = self.physical_flux(lqh[(idof, 0)]);
+                let transformed_f = dt / jacob_det * f;
+                lfh[(idof, 0)] = transformed_f;
             }
             // update lqh
-            for ivar in 0..1 {
-                // Convert 2D views to 1D vectors for matrix multiplication
-                let lfh_slice: ArrayView1<f64> = lfh
-                    .slice(s![.., .., ivar])
-                    .into_shape(cell_ngp * cell_ngp)
-                    .unwrap();
-                // Perform matrix multiplication and store result back in lqh
-                let result: Array1<f64> = self.stst_ik1_mat.dot(
-                    &(self.sts_f0_mat.dot(&sol.slice(s![.., ivar]))
-                        - self.stst_kxi_mat.dot(&lfh_slice)),
-                );
-                lqh.slice_mut(s![.., .., ivar])
-                    .assign(&result.into_shape((cell_ngp, cell_ngp)).unwrap());
-            }
+            let lfh_slice: ArrayView1<f64> = lfh.slice(s![.., 0]);
+            // Perform matrix multiplication and store result back in lqh
+            let result: Array1<f64> = self
+                .ik1_mat
+                .dot(&(self.f0_mat.dot(&sol.slice(s![.., 0])) - self.kxi_mat.dot(&lfh_slice)));
+            lqh.slice_mut(s![.., 0]).assign(&result);
         }
     }
     fn volume_integral(
         &self,
-        lqh: ArrayView3<f64>,        // (ntdof, nxdof, neq)
+        lqh: ArrayView2<f64>,        // (ntdof, nxdof, neq)
         mut res: ArrayViewMut2<f64>, // (nxdof, neq)
         elem: &Element1d,
+        dt: f64,
     ) {
-        let cell_ngp = self.solver_param.cell_gp_num;
-        let mut lfh: Array3<f64> = Array3::zeros((cell_ngp, cell_ngp, 1));
-        for kgp in 0..cell_ngp {
-            for igp in 0..cell_ngp {
-                let f: Array1<f64> = flux1d(lqh.slice(s![kgp, igp, ..]));
-                lfh.slice_mut(s![kgp, igp, ..]).assign(&f);
-            }
-        }
-        for ivar in 0..1 {
-            let lfh_slice: ArrayView1<f64> = lfh
-                .slice(s![.., .., ivar])
-                .into_shape(cell_ngp * cell_ngp)
-                .unwrap();
-            res.slice_mut(s![.., ivar])
-                .scaled_add(1.0, &self.sst_kxi_mat.dot(&lfh_slice));
+        let ngp = self.space_time_basis.xi.len();
+        let x: [f64; 2] = std::array::from_fn(|i| self.mesh.nodes[elem.inodes[i]].x);
+        let jacob_det = Self::compute_interval_length(&x);
+        let mut lfh = Array2::zeros((ngp, 1));
+        for igp in 0..ngp {
+            let f = self.physical_flux(lqh[(igp, 0)]);
+            let transformed_f = dt / jacob_det * f;
+            lfh[(igp, 0)] = transformed_f;
+            let dtest_func_dxi = self.space_basis.dr_cub[(igp, itest_func)];
         }
     }
     fn edge_integral(
@@ -447,3 +420,10 @@ impl<'a> Disc1dBurgers<'a> {
         }
     }
 }
+impl ADER1DScalar for Disc1dBurgers<'_> {
+    fn physical_flux(&self, u: f64) -> f64 {
+        0.5 * u * u
+    }
+}
+impl ADER1DMatrices for Disc1dBurgers<'_> {}
+impl Geometric1D for Disc1dBurgers<'_> {}

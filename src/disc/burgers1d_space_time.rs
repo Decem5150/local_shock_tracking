@@ -7,7 +7,7 @@ use super::{
     mesh::mesh2d::{Mesh2d, TriangleElement},
 };
 use crate::{
-    disc::{Geometric2D, P0Solver, SQP, SpaceTimeSolver1DScalar},
+    disc::{P0Solver, SQP, SpaceTimeSolver1DScalar, geometric::Geometric2D},
     solver::SolverParameters,
 };
 
@@ -177,15 +177,15 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
         solutions.slice_mut(s![2, ..]).fill(0.0);
         solutions.slice_mut(s![3, ..]).fill(0.0);
         */
-        solutions.slice_mut(s![0, ..]).fill(2.0);
-        solutions.slice_mut(s![1, ..]).fill(2.0);
-        solutions.slice_mut(s![2, ..]).fill(1.0);
-        solutions.slice_mut(s![3, ..]).fill(1.0);
+        solutions.slice_mut(s![0, ..]).fill(3.0);
+        solutions.slice_mut(s![1, ..]).fill(3.0);
+        solutions.slice_mut(s![2, ..]).fill(5.0);
+        solutions.slice_mut(s![3, ..]).fill(5.0);
 
-        solutions.slice_mut(s![4, ..]).fill(2.0);
-        solutions.slice_mut(s![5, ..]).fill(2.0);
-        solutions.slice_mut(s![6, ..]).fill(1.0);
-        solutions.slice_mut(s![7, ..]).fill(1.0);
+        solutions.slice_mut(s![4, ..]).fill(3.0);
+        solutions.slice_mut(s![5, ..]).fill(3.0);
+        solutions.slice_mut(s![6, ..]).fill(5.0);
+        solutions.slice_mut(s![7, ..]).fill(5.0);
     }
 }
 impl P0Solver for Disc1dBurgers1dSpaceTime<'_> {

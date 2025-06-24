@@ -1,18 +1,19 @@
+pub mod ader;
 pub mod basis;
 // pub mod boundary_conditions;
 // pub mod flux;
 pub mod gauss_points;
+pub mod geometric;
 pub mod mesh;
 // pub mod riemann_solver;
-pub mod advection1d_space_time_quad;
+// pub mod advection1d_space_time_quad;
 pub mod advection1d_space_time_tri;
-pub mod burgers1d;
+// pub mod burgers1d;
 pub mod burgers1d_space_time;
 // pub mod euler1d;
 use faer::{Col, linalg::solvers::DenseSolveCore, prelude::Solve};
 use faer_ext::{IntoFaer, IntoNdarray};
 use ndarray::{Array, Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, Axis, concatenate, s};
-use ndarray_linalg::Inverse;
 use ndarray_stats::QuantileExt;
 
 use crate::disc::{
@@ -20,94 +21,10 @@ use crate::disc::{
         Basis, lagrange1d::LagrangeBasis1DLobatto, quadrilateral::QuadrilateralBasis,
         triangle::TriangleBasis,
     },
+    geometric::Geometric2D,
     mesh::mesh2d::{Mesh2d, TriangleElement},
 };
-pub trait Geometric2D {
-    fn compute_normal(x0: f64, y0: f64, x1: f64, y1: f64) -> [f64; 2] {
-        // normalized normal vector
-        let normal = [y1 - y0, x0 - x1];
-        let normal_magnitude = (normal[0].powi(2) + normal[1].powi(2)).sqrt();
-        [normal[0] / normal_magnitude, normal[1] / normal_magnitude]
-    }
-    fn compute_ref_normal(local_id: usize) -> [f64; 2] {
-        match local_id {
-            0 => {
-                // Bottom edge: from (0,0) to (1,0)
-                // Outward normal points downward
-                [0.0, -1.0]
-            }
-            1 => {
-                // Hypotenuse edge: from (1,0) to (0,1)
-                // Edge vector: (-1, 1), normal: (1, 1) normalized
-                let sqrt2_inv = 1.0 / (2.0_f64.sqrt());
-                [sqrt2_inv, sqrt2_inv]
-            }
-            2 => {
-                // Left edge: from (0,1) to (0,0)
-                // Outward normal points leftward
-                [-1.0, 0.0]
-            }
-            _ => {
-                panic!("Invalid edge ID");
-            }
-        }
-    }
-    fn compute_ref_edge_length(local_id: usize) -> f64 {
-        match local_id {
-            0 => 2.0,
-            1 => 2.0 * 2.0_f64.sqrt(),
-            2 => 2.0,
-            _ => panic!("Invalid edge ID"),
-        }
-    }
-    fn evaluate_jacob(_xi: f64, _eta: f64, x: &[f64], y: &[f64]) -> (f64, [f64; 4]) {
-        // For triangular elements with reference triangle vertices at:
-        // Node 0: (-1, -1)
-        // Node 1: (1, -1)
-        // Node 2: (-1, 1)
-        // Shape functions for linear triangle:
-        // N0 = -(xi + eta)/2     (node 0)
-        // N1 = (1 + xi)/2        (node 1)
-        // N2 = (1 + eta)/2       (node 2)
 
-        let dn_dxi = [
-            -0.5, // dN0/dξ
-            0.5,  // dN1/dξ
-            0.0,  // dN2/dξ
-        ];
-        let dn_deta = [
-            -0.5, // dN0/dη
-            0.0,  // dN1/dη
-            0.5,  // dN2/dη
-        ];
-
-        let mut dx_dxi = 0.0;
-        let mut dx_deta = 0.0;
-        let mut dy_dxi = 0.0;
-        let mut dy_deta = 0.0;
-
-        for k in 0..3 {
-            dx_dxi += dn_dxi[k] * x[k];
-            dx_deta += dn_deta[k] * x[k];
-            dy_dxi += dn_dxi[k] * y[k];
-            dy_deta += dn_deta[k] * y[k];
-        }
-
-        let jacob_det = dx_dxi * dy_deta - dx_deta * dy_dxi;
-        let jacob_inv_t = [
-            dy_deta / jacob_det,
-            -dy_dxi / jacob_det,
-            -dx_deta / jacob_det,
-            dx_dxi / jacob_det,
-        ];
-
-        (jacob_det, jacob_inv_t)
-    }
-    fn compute_element_area(x: &[f64], y: &[f64]) -> f64 {
-        // For triangular elements, assumes x and y are slices of length 3
-        0.5 * ((x[1] - x[0]) * (y[2] - y[0]) - (x[2] - x[0]) * (y[1] - y[0])).abs()
-    }
-}
 pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
     fn compute_initial_guess(&self) -> Array2<f64> {
         let mut solutions = Array2::zeros((self.mesh().elem_num, 1));
@@ -213,63 +130,7 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
     }
     fn compute_time_steps(&self, _solutions: ArrayView2<f64>) -> Array1<f64>;
 }
-pub trait ADER1DScalar {}
-pub trait ADER1DMatrices {
-    fn compute_m_mat(basis: &QuadrilateralBasis) -> Array2<f64> {
-        basis.inv_vandermonde.t().dot(&basis.inv_vandermonde)
-    }
-    fn compute_k_xi_mat(basis: &QuadrilateralBasis, m_mat: ArrayView2<f64>) -> Array2<f64> {
-        m_mat.dot(&basis.dxi)
-    }
-    fn compute_ik1_mat(basis: &QuadrilateralBasis, m_mat: ArrayView2<f64>) -> Array2<f64> {
-        let n_pts_2d = basis.xi.len();
-        let n_pts_1d = (n_pts_2d as f64).sqrt() as usize;
-        let n = n_pts_1d - 1;
 
-        let basis_1d = LagrangeBasis1DLobatto::new(n_pts_1d);
-        let mut m_1d = Array2::zeros((n_pts_1d, n_pts_1d));
-        for i in 0..n_pts_1d {
-            m_1d[(i, i)] = basis_1d.cell_gauss_weights[i] / 2.0;
-        }
-
-        let mut f1_mat = Array2::zeros((n_pts_2d, n_pts_2d));
-        for i_xi in 0..n_pts_1d {
-            for j_xi in 0..n_pts_1d {
-                let i_dof = n * n_pts_1d + i_xi;
-                let j_dof = n * n_pts_1d + j_xi;
-                f1_mat[(i_dof, j_dof)] = m_1d[(i_xi, j_xi)];
-            }
-        }
-
-        let t_mat = m_mat.dot(&basis.deta);
-
-        let k1_mat = &f1_mat - &t_mat;
-        k1_mat.inv().unwrap()
-    }
-    fn compute_f0_mat(basis: &QuadrilateralBasis) -> Array2<f64> {
-        let n_pts_2d = basis.xi.len();
-        let n_pts_1d = (n_pts_2d as f64).sqrt() as usize;
-
-        let basis_1d = LagrangeBasis1DLobatto::new(n_pts_1d);
-
-        let mut m_1d = Array2::zeros((n_pts_1d, n_pts_1d));
-        for i in 0..n_pts_1d {
-            m_1d[(i, i)] = basis_1d.cell_gauss_weights[i] / 2.0;
-        }
-
-        let phi_at_0 = basis_1d.evaluate_all_basis_at(-1.0);
-
-        let mut f0_mat = Array2::zeros((n_pts_2d, n_pts_1d));
-        for i in 0..n_pts_2d {
-            let ix = i % n_pts_1d;
-            let it = i / n_pts_1d;
-            for j in 0..n_pts_1d {
-                f0_mat[(i, j)] = phi_at_0[it] * m_1d[(ix, j)];
-            }
-        }
-        f0_mat
-    }
-}
 pub trait SpaceTimeSolver1DScalar: Geometric2D {
     fn basis(&self) -> &TriangleBasis;
     fn enriched_basis(&self) -> &TriangleBasis;
@@ -566,8 +427,6 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
         mut dy: ArrayViewMut2<f64>,
         is_enriched: bool,
     ) {
-        let nelem = self.mesh().elem_num;
-        let nnode = self.mesh().node_num;
         let basis = {
             if is_enriched {
                 &self.enriched_basis()
@@ -576,10 +435,8 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
             }
         };
         let unenriched_ncell_basis = self.basis().r.len();
-        let unenriched_nedge_basis = self.basis().quad_p.len();
         let ncell_basis = basis.r.len();
         let nedge_basis = basis.quad_p.len();
-        let cell_weights = &basis.cub_w;
         let edge_weights = &basis.quad_w;
         for (ielem, elem) in self.mesh().elements.iter().enumerate() {
             let inodes = &elem.inodes;
@@ -1263,7 +1120,11 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
             enriched_dsol.fill(0.0);
             enriched_dx.fill(0.0);
             enriched_dy.fill(0.0);
-            println!("solutions: {:?}", solutions);
+            println!("Solutions:");
+            for row in solutions.rows() {
+                let row_str: Vec<String> = row.iter().map(|&val| format!("{:.4}", val)).collect();
+                println!("[{}]", row_str.join(", "));
+            }
             self.mesh().print_free_node_coords();
             self.compute_residuals_and_derivatives(
                 solutions.view(),

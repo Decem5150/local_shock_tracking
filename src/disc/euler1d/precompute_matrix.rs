@@ -1,10 +1,10 @@
+use super::Disc1dEuler;
 use ndarray::Array2;
 use ndarray_linalg::Inverse;
-use super::Disc1dEuler;
 
 impl<'a> Disc1dEuler<'a> {
     pub fn compute_m_mat(&mut self) {
-        let cell_ngp = self.solver_param.cell_gp_num;
+        let cell_ngp = self.solver_param.polynomial_order + 1;
         for i in 0..cell_ngp * cell_ngp {
             // ith space-time DOF
             for j in 0..cell_ngp * cell_ngp {
@@ -32,7 +32,7 @@ impl<'a> Disc1dEuler<'a> {
         }
     }
     pub fn compute_kx_mat(&mut self) {
-        let cell_ngp = self.solver_param.cell_gp_num;
+        let cell_ngp = self.solver_param.polynomial_order + 1;
         for i in 0..cell_ngp * cell_ngp {
             // ith space-time DOF
             for j in 0..cell_ngp * cell_ngp {
@@ -60,7 +60,7 @@ impl<'a> Disc1dEuler<'a> {
         }
     }
     pub fn compute_ik1_mat(&mut self) {
-        let cell_ngp = self.solver_param.cell_gp_num;
+        let cell_ngp = self.solver_param.polynomial_order + 1;
         let mut f1_mat = Array2::zeros((cell_ngp * cell_ngp, cell_ngp * cell_ngp));
         for i in 0..cell_ngp * cell_ngp {
             for j in 0..cell_ngp * cell_ngp {
@@ -116,7 +116,7 @@ impl<'a> Disc1dEuler<'a> {
         self.ik1_mat = k1_mat.inv().unwrap();
     }
     pub fn compute_f0_mat(&mut self) {
-        let cell_ngp = self.solver_param.cell_gp_num;
+        let cell_ngp = self.solver_param.polynomial_order + 1;
         for i in 0..cell_ngp * cell_ngp {
             for j in 0..cell_ngp * cell_ngp {
                 let mut sum = 0.0;
@@ -127,11 +127,14 @@ impl<'a> Disc1dEuler<'a> {
                     let jx = j % cell_ngp;
                     let jt = j / cell_ngp;
 
-                    sum += self.basis.cell_gauss_weights[k_x] * 
-                           self.basis.phis_cell_gps[(k_x, ix)] * 
-                           self.basis.phis_cell_gps[(0, it)] *  // Evaluate temporal basis at t=0
-                           self.basis.phis_cell_gps[(k_x, jx)] * 
-                           self.basis.phis_cell_gps[(0, jt)]; // Evaluate temporal basis at t=0
+                    let kronecker_it = if it == 0 { 1.0 } else { 0.0 };
+                    let kronecker_jt = if jt == 0 { 1.0 } else { 0.0 };
+
+                    sum += self.basis.cell_gauss_weights[k_x]
+                        * self.basis.phis_cell_gps[(k_x, ix)]
+                        * kronecker_it
+                        * self.basis.phis_cell_gps[(k_x, jx)]
+                        * kronecker_jt;
                 }
                 self.f0_mat[[i, j]] = sum;
             }

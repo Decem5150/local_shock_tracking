@@ -2,13 +2,14 @@ use ndarray::{Array1, Array2, ArrayView2, ArrayViewMut2, s};
 use ndarray_linalg::Inverse;
 use std::autodiff::autodiff_reverse;
 
-use super::Geometric2D;
 use super::{
     basis::{Basis, triangle::TriangleBasis},
     mesh::mesh2d::{Mesh2d, TriangleElement},
 };
-use crate::disc::{P0Solver, SQP, SpaceTimeSolver1DScalar};
-use crate::solver::SolverParameters;
+use crate::{
+    disc::{P0Solver, SQP, SpaceTimeSolver1DScalar, geometric::Geometric2D},
+    solver::SolverParameters,
+};
 
 pub struct Disc1dAdvectionSpaceTimeTri<'a> {
     basis: TriangleBasis,
@@ -141,7 +142,7 @@ impl<'a> Disc1dAdvectionSpaceTimeTri<'a> {
             interp_node_to_enriched_quadrature,
             mesh,
             solver_param,
-            advection_speed: 0.6,
+            advection_speed: 0.75,
         }
     }
 }

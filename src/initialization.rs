@@ -14,19 +14,17 @@ use crate::{
         },
     },
     io::params_parser::SolverParamParser,
-    solver::{ShockTrackingSolverQuad, ShockTrackingSolverTri, SolverParameters},
+    solver::{ShockTrackingSolverTri, SolverParameters},
 };
 
 pub fn initialize_params() -> SolverParameters {
     let solver_param_parser = SolverParamParser::parse("inputs/solverparam.json");
     let polynomial_order = solver_param_parser.polynomial_order;
-    let cell_gp_num = polynomial_order + 1;
     let solver_params = SolverParameters {
         cfl: solver_param_parser.cfl,
         final_time: solver_param_parser.final_time,
         final_step: solver_param_parser.final_step,
         polynomial_order,
-        cell_gp_num,
         equation_num: 1,
     };
 
@@ -34,13 +32,11 @@ pub fn initialize_params() -> SolverParameters {
 }
 pub fn initialize_params_advection() -> SolverParameters {
     let polynomial_order = 3;
-    let cell_gp_num = polynomial_order + 1;
     let solver_params = SolverParameters {
         cfl: 1.0,
         final_time: 0.0,
         final_step: 10,
         polynomial_order,
-        cell_gp_num,
         equation_num: 1,
     };
     solver_params
@@ -57,6 +53,7 @@ pub fn initialize_mesh1d(node_num: usize, left_coord: f64, right_coord: f64) -> 
 pub fn initialize_two_element_mesh2d() -> Mesh2d<QuadrilateralElement> {
     Mesh2d::create_two_quad_mesh()
 }
+/*
 pub fn initialize_quad_solver<'a>(
     mesh: &'a mut Mesh2d<QuadrilateralElement>,
     basis: LagrangeBasis1DLobatto,
@@ -66,6 +63,8 @@ pub fn initialize_quad_solver<'a>(
     let solver = ShockTrackingSolverQuad::new(basis, enriched_basis, mesh, solver_param);
     solver
 }
+*/
+
 pub fn initialize_tri_solver<'a>(
     mesh: &'a mut Mesh2d<TriangleElement>,
     basis: TriangleBasis,
@@ -80,3 +79,20 @@ pub fn initialize_tri_solver<'a>(
     );
     solver
 }
+
+/*
+pub fn initialize_tri_solver<'a>(
+    mesh: &'a mut Mesh2d<TriangleElement>,
+    basis: TriangleBasis,
+    enriched_basis: TriangleBasis,
+    solver_param: &'a SolverParameters,
+) -> ShockTrackingSolverTri<'a, Disc1dAdvectionSpaceTimeTri<'a>> {
+    let solver = ShockTrackingSolverTri::<Disc1dAdvectionSpaceTimeTri>::new(
+        basis,
+        enriched_basis,
+        mesh,
+        solver_param,
+    );
+    solver
+}
+*/

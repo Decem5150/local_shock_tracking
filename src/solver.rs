@@ -1,6 +1,7 @@
 use crate::disc::{
-    SQP, SpaceTimeSolver1DScalar,
-    advection1d_space_time_quad::Disc1dAdvectionSpaceTimeQuad,
+    SQP,
+    SpaceTimeSolver1DScalar,
+    // advection1d_space_time_quad::Disc1dAdvectionSpaceTimeQuad,
     advection1d_space_time_tri::Disc1dAdvectionSpaceTimeTri,
     basis::{lagrange1d::LagrangeBasis1DLobatto, triangle::TriangleBasis},
     burgers1d_space_time::Disc1dBurgers1dSpaceTime,
@@ -13,7 +14,6 @@ pub struct SolverParameters {
     pub final_time: f64,
     pub final_step: usize,
     pub polynomial_order: usize,
-    pub cell_gp_num: usize,
     pub equation_num: usize,
 }
 pub struct ShockTrackingParameters {
@@ -21,6 +21,7 @@ pub struct ShockTrackingParameters {
     pub edge_gp_num: usize,
     pub basis_num: usize,
 }
+/*
 pub struct ShockTrackingSolverQuad<'a> {
     pub solutions: Array<f64, Ix2>,
     pub disc: Disc1dAdvectionSpaceTimeQuad<'a>,
@@ -34,10 +35,8 @@ impl<'a> ShockTrackingSolverQuad<'a> {
         mesh: &'a mut Mesh2d<QuadrilateralElement>,
         solver_params: &'a SolverParameters,
     ) -> Self {
-        let solutions = Array::zeros((
-            mesh.elem_num,
-            solver_params.cell_gp_num * solver_params.cell_gp_num,
-        ));
+        let ngp = (solver_params.polynomial_order + 1) * (solver_params.polynomial_order + 1);
+        let solutions = Array::zeros((mesh.elem_num, ngp));
         let disc = Disc1dAdvectionSpaceTimeQuad::new(basis, enriched_basis, mesh, solver_params);
         Self {
             solutions,
@@ -50,6 +49,7 @@ impl<'a> ShockTrackingSolverQuad<'a> {
         self.disc.solve(self.solutions.view_mut());
     }
 }
+*/
 pub struct ShockTrackingSolverTri<'a, T: SpaceTimeSolver1DScalar + SQP> {
     pub solutions: Array<f64, Ix2>,
     pub disc: T,
