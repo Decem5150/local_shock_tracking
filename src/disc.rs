@@ -8,7 +8,7 @@ pub mod mesh;
 // pub mod riemann_solver;
 // pub mod advection1d_space_time_quad;
 pub mod advection1d_space_time_tri;
-// pub mod burgers1d;
+pub mod burgers1d;
 pub mod burgers1d_space_time;
 // pub mod euler1d;
 use faer::{Col, linalg::solvers::DenseSolveCore, prelude::Solve};
@@ -17,10 +17,7 @@ use ndarray::{Array, Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, Axis
 use ndarray_stats::QuantileExt;
 
 use crate::disc::{
-    basis::{
-        Basis, lagrange1d::LagrangeBasis1DLobatto, quadrilateral::QuadrilateralBasis,
-        triangle::TriangleBasis,
-    },
+    basis::{Basis, quadrilateral::QuadrilateralBasis, triangle::TriangleBasis},
     geometric::Geometric2D,
     mesh::mesh2d::{Mesh2d, TriangleElement},
 };

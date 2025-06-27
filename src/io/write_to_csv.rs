@@ -2,7 +2,7 @@ use csv::Writer;
 use ndarray::ArrayView3;
 use serde::Serialize;
 
-use crate::disc::{basis::lagrange1d::LagrangeBasis1DLobatto, mesh::mesh1d::Mesh1d};
+use crate::disc::{basis::lagrange1d::LobattoBasis, mesh::mesh1d::Mesh1d};
 
 #[derive(Serialize)]
 struct PointData {
@@ -14,7 +14,7 @@ struct PointData {
 pub fn write_to_csv(
     solutions: ArrayView3<f64>,
     mesh: &Mesh1d,
-    basis: &LagrangeBasis1DLobatto,
+    basis: &LobattoBasis,
     current_time: f64,
     filename: &str,
 ) -> Result<f64, csv::Error> {

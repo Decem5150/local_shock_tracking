@@ -1,13 +1,15 @@
 use crate::disc::{
-    SQP,
-    SpaceTimeSolver1DScalar,
-    // advection1d_space_time_quad::Disc1dAdvectionSpaceTimeQuad,
+    SQP, SpaceTimeSolver1DScalar,
     advection1d_space_time_tri::Disc1dAdvectionSpaceTimeTri,
-    basis::{lagrange1d::LagrangeBasis1DLobatto, triangle::TriangleBasis},
+    basis::{lagrange1d::LobattoBasis, quadrilateral::QuadrilateralBasis, triangle::TriangleBasis},
+    burgers1d::Disc1dBurgers,
     burgers1d_space_time::Disc1dBurgers1dSpaceTime,
-    mesh::mesh2d::{Mesh2d, QuadrilateralElement, TriangleElement},
+    mesh::{
+        mesh1d::Mesh1d,
+        mesh2d::{Mesh2d, QuadrilateralElement, TriangleElement},
+    },
 };
-use ndarray::{Array, Ix2};
+use ndarray::{Array, Array3, Ix2};
 
 pub struct SolverParameters {
     pub cfl: f64,
@@ -95,32 +97,33 @@ impl<'a, T: SpaceTimeSolver1DScalar + SQP> ShockTrackingSolverTri<'a, T> {
         self.disc.solve(self.solutions.view_mut());
     }
 }
-/*
+
 pub struct Solver<'a> {
-    pub solutions: Array<f64, Ix3>,
+    pub solutions: Array3<f64>,
     pub disc: Disc1dBurgers<'a>,
-    pub mesh: &'a Mesh1d,
-    pub flow_params: &'a FlowParameters,
     pub solver_params: &'a SolverParameters,
     // pub shock_tracking_param: ShockTrackingParameters,
 }
 impl<'a> Solver<'a> {
     pub fn new(
-        basis: LagrangeBasis1DLobatto,
+        space_basis: LobattoBasis,
+        time_basis: LobattoBasis,
+        space_time_basis: QuadrilateralBasis,
         mesh: &'a Mesh1d,
-        flow_params: &'a FlowParameters,
         solver_params: &'a SolverParameters,
     ) -> Self {
-        let solutions = Array::zeros((
-            mesh.elem_num,
-            solver_params.cell_gp_num,
-            solver_params.equation_num,
-        ));
-        let disc = Disc1dBurgers::new(basis, mesh, flow_params, solver_params);
+        let n = solver_params.polynomial_order;
+        let ngp = n + 1;
+        let solutions = Array3::zeros((mesh.elem_num, ngp, solver_params.equation_num));
+        let disc = Disc1dBurgers::new(
+            space_basis,
+            time_basis,
+            space_time_basis,
+            mesh,
+            solver_params,
+        );
         Self {
             disc,
-            mesh,
-            flow_params,
             solver_params,
             solutions,
         }
@@ -133,4 +136,3 @@ impl<'a> Solver<'a> {
         self.disc.solve(self.solutions.view_mut());
     }
 }
-    */

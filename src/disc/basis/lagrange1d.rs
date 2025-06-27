@@ -1,162 +1,61 @@
-use crate::disc::gauss_points::{
-    legendre_points::get_legendre_points_interval, lobatto_points::get_lobatto_points_interval,
-};
-use ndarray::{Array, Ix1, Ix2};
+use crate::disc::{basis::Basis, gauss_points::lobatto_points::get_lobatto_points_interval};
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
+use ndarray_linalg::Inverse;
 
-pub struct LagrangeBasis1D {
-    pub cell_gauss_points: Array<f64, Ix1>,
-    pub cell_gauss_weights: Array<f64, Ix1>,
-    pub phis_cell_gps: Array<f64, Ix2>,
-    pub dphis_cell_gps: Array<f64, Ix2>,
-    pub phis_bnd_gps: Array<f64, Ix2>,
-    pub dphis_bnd_gps: Array<f64, Ix2>,
+pub struct LobattoBasis {
+    pub xi: Array1<f64>,
+    pub weights: Array1<f64>,
+    pub vandermonde: Array2<f64>,
+    pub inv_vandermonde: Array2<f64>,
+    pub dxi: Array2<f64>,
 }
 
-pub struct LagrangeBasis1DLobatto {
-    pub cell_gauss_points: Vec<f64>,
-    pub cell_gauss_weights: Vec<f64>,
-    pub phis_cell_gps: Array<f64, Ix2>,  // (nbasis, ngp)
-    pub dphis_cell_gps: Array<f64, Ix2>, // (nbasis, ngp)
-}
-
-impl LagrangeBasis1D {
-    pub fn new(cell_gp_num: usize) -> LagrangeBasis1D {
-        let dofs = cell_gp_num;
-        let (cell_gauss_points, cell_gauss_weights) = get_legendre_points_interval(dofs);
-        let mut phis_cell_gps = Array::zeros((dofs, dofs));
-        let mut dphis_cell_gps = Array::zeros((dofs, dofs));
-        let mut phis_bnd_gps = Array::zeros((2, dofs));
-        let mut dphis_bnd_gps = Array::zeros((2, dofs));
-        // compute the basis functions at the gauss points
-        for i in 0..dofs {
-            for j in 0..dofs {
-                phis_cell_gps[(i, j)] = if i == j { 1.0 } else { 0.0 };
-            }
-        }
-        // compute the basis functions at the boundary gauss points (-1 and 1).
-        let boundary_points = [-1.0, 1.0]; // left and right boundary points
-        for i in 0..2 {
-            // loop over boundary points
-            for j in 0..dofs {
-                // loop over the basis functions
-                let mut product = 1.0;
-                for m in 0..dofs {
-                    // loop over the gauss points
-                    if m != j {
-                        // skip the current gauss point
-                        product *= (boundary_points[i] - cell_gauss_points[m])
-                            / (cell_gauss_points[j] - cell_gauss_points[m]);
-                    }
-                }
-                phis_bnd_gps[(i, j)] = product;
-            }
-        }
-        // compute the derivatives of the basis functions at the gauss points.
-        for j in 0..dofs {
-            // loop over the gauss points
-            for i in 0..dofs {
-                // loop over the basis functions
-                let mut derivative = 0.0;
-                for k in 0..dofs {
-                    // loop over the gauss points
-                    if k != j {
-                        // skip the current gauss point
-                        let mut product = 1.0;
-                        for m in 0..dofs {
-                            // loop over the gauss points
-                            if m != j && m != k {
-                                // skip the current gauss point and the gauss point we are computing the derivative at
-                                product *= (cell_gauss_points[i] - cell_gauss_points[m])
-                                    / (cell_gauss_points[j] - cell_gauss_points[m]);
-                            }
-                        }
-                        derivative += product / (cell_gauss_points[j] - cell_gauss_points[k]);
-                    }
-                }
-                dphis_cell_gps[(i, j)] = derivative;
-            }
-        }
-        // compute the derivatives of the basis functions at the boundary gauss points.
-        for i in 0..2 {
-            // loop over boundary points
-            for j in 0..dofs {
-                // loop over the basis functions
-                let mut derivative = 0.0;
-                for k in 0..dofs {
-                    // loop over the gauss points
-                    if k != j {
-                        // skip the current gauss point
-                        let mut product = 1.0;
-                        for m in 0..dofs {
-                            // loop over the gauss points
-                            if m != j && m != k {
-                                // skip the current gauss point and the gauss point we are computing the derivative at
-                                product *= (boundary_points[i] - cell_gauss_points[m])
-                                    / (cell_gauss_points[j] - cell_gauss_points[m]);
-                            }
-                        }
-                        derivative += product / (cell_gauss_points[j] - cell_gauss_points[k]);
-                    }
-                }
-                dphis_bnd_gps[(i, j)] = derivative;
-            }
-        }
-        LagrangeBasis1D {
-            cell_gauss_points,
-            cell_gauss_weights,
-            phis_cell_gps,
-            dphis_cell_gps,
-            phis_bnd_gps,
-            dphis_bnd_gps,
-        }
-    }
-}
-
-impl LagrangeBasis1DLobatto {
-    pub fn new(cell_gp_num: usize) -> LagrangeBasis1DLobatto {
-        let dofs = cell_gp_num;
-        let (cell_gauss_points, cell_gauss_weights) = get_lobatto_points_interval(dofs);
-        let mut phis_cell_gps = Array::zeros((dofs, dofs));
-        let mut dphis_cell_gps = Array::zeros((dofs, dofs));
-        // Compute the basis functions at the gauss points
-        for j in 0..dofs {
-            for i in 0..dofs {
-                phis_cell_gps[(j, i)] = if i == j { 1.0 } else { 0.0 };
-            }
-        }
-        // Compute the derivatives of the basis functions at the gauss points
-        for j in 0..dofs {
-            // loop over basis functions
-            for i in 0..dofs {
-                // loop over gauss points
-                let mut sum = 0.0;
-                for l in 0..dofs {
-                    if l != j {
-                        let mut product = 1.0;
-                        for m in 0..dofs {
-                            if m != j && m != l {
-                                product *= (cell_gauss_points[i] - cell_gauss_points[m])
-                                    / (cell_gauss_points[j] - cell_gauss_points[m]);
-                            }
-                        }
-                        sum += product / (cell_gauss_points[j] - cell_gauss_points[l]);
-                    }
-                }
-
-                dphis_cell_gps[(j, i)] = sum;
-            }
-        }
-        LagrangeBasis1DLobatto {
-            cell_gauss_points,
-            cell_gauss_weights,
-            phis_cell_gps,
-            dphis_cell_gps,
+impl LobattoBasis {
+    pub fn new(n: usize) -> LobattoBasis {
+        let dofs = n + 1;
+        let (xi_vec, weights_vec) = get_lobatto_points_interval(dofs);
+        let xi = Array1::from(xi_vec).mapv(|v| (v + 1.0) / 2.0);
+        let weights = Array1::from(weights_vec).mapv(|v| v / 2.0);
+        let xi_map = xi.mapv(|x| 2. * x - 1.);
+        let vandermonde = Self::vandermonde1d(n, xi_map.view());
+        let inv_vandermonde = vandermonde.inv().unwrap();
+        let dxi = Self::dmatrix_1d(n, xi.view(), vandermonde.view());
+        println!("dxi: {:?}", dxi);
+        LobattoBasis {
+            xi,
+            weights,
+            vandermonde,
+            inv_vandermonde,
+            dxi,
         }
     }
 
     /// # Arguments
     /// * `i` - Index of the basis function to evaluate
     /// * `x` - Point at which to evaluate the basis function
+    fn grad_vandermonde_1d(n: usize, xi: ArrayView1<f64>) -> Array2<f64> {
+        let n_basis_1d = n + 1;
+        let num_points = xi.len();
+        let mut vxi = Array2::zeros((num_points, n_basis_1d));
+
+        let xi_map = xi.mapv(|x| 2. * x - 1.);
+
+        let mut sk = 0;
+        for i in 0..n_basis_1d {
+            let mut dp_i_xi = Self::grad_jacobi_polynomial(xi_map.view(), 0.0, 0.0, i as i32);
+            dp_i_xi.mapv_inplace(|val| val * 2.0);
+            vxi.column_mut(sk).assign(&dp_i_xi);
+            sk += 1;
+        }
+        vxi
+    }
+    fn dmatrix_1d(n: usize, xi: ArrayView1<f64>, v: ArrayView2<f64>) -> Array2<f64> {
+        let vxi = Self::grad_vandermonde_1d(n, xi);
+        let inv_v = v.inv().unwrap();
+        let dxi = vxi.dot(&inv_v);
+        dxi
+    }
+    /*
     pub fn evaluate_basis_at(&self, i: usize, x: f64) -> f64 {
         let n = self.cell_gauss_points.len();
 
@@ -215,5 +114,29 @@ impl LagrangeBasis1DLobatto {
         }
 
         result
+    }
+    */
+}
+impl Basis for LobattoBasis {
+    fn vandermonde2d(_n: usize, _r: ArrayView1<f64>, _s: ArrayView1<f64>) -> Array2<f64> {
+        unimplemented!()
+    }
+    fn grad_vandermonde_2d(
+        _n: usize,
+        _r: ArrayView1<f64>,
+        _s: ArrayView1<f64>,
+    ) -> (Array2<f64>, Array2<f64>) {
+        unimplemented!()
+    }
+    fn nodes2d(_n: usize) -> (Array1<f64>, Array1<f64>) {
+        unimplemented!()
+    }
+    fn dmatrices_2d(
+        _n: usize,
+        _r: ArrayView1<f64>,
+        _s: ArrayView1<f64>,
+        _v: ArrayView2<f64>,
+    ) -> (Array2<f64>, Array2<f64>) {
+        unimplemented!()
     }
 }
