@@ -5,6 +5,7 @@ mod precompute_matrix;
 mod riemann_solver;
 // mod shock_tracking;
 use super::mesh::mesh1d::Mesh1d;
+use crate::disc::ader::ADER1DShockTracking;
 use crate::disc::basis::quadrilateral::QuadrilateralBasis;
 use crate::disc::geometric::Geometric1D;
 use crate::disc::{
@@ -67,6 +68,7 @@ impl<'a> Disc1dBurgers<'a> {
             ik1_mat,
             f0_mat,
         };
+        /*
         let (space_m_mat_ref, space_time_m_mat_ref) = disc.compute_m_mat_ref();
         let kxi_mat_ref = disc.compute_kxi_mat_ref();
         let ik1_mat_ref = disc.compute_ik1_mat_ref();
@@ -76,6 +78,7 @@ impl<'a> Disc1dBurgers<'a> {
         println!("kxi_mat_ref: {:?}", kxi_mat_ref);
         println!("ik1_mat_ref: {:?}", ik1_mat_ref);
         println!("f0_mat_ref: {:?}", f0_mat_ref);
+        */
         /*
         dbg!(&disc.ss_m_mat);
         dbg!(&disc.ss_im_mat);
@@ -305,6 +308,24 @@ impl<'a> Disc1dBurgers<'a> {
             }
             */
 
+            {
+                let ielem = 0;
+                let solution_slice = solutions.slice(s![ielem, .., 0]);
+                println!("solution_slice: {:?}", solution_slice);
+                let vertex_coords = Array1::linspace(0.0, 1.0, 4);
+                let subpoint_coords =
+                    Self::compute_subpoint_coords(&self.space_basis, vertex_coords.view());
+                println!("subpoint_coords: {:?}", subpoint_coords);
+                let interp_matrix = Self::compute_interp_matrix(
+                    self.solver_param.polynomial_order,
+                    self.space_basis.inv_vandermonde.view(),
+                    subpoint_coords.view(),
+                );
+                println!("interp_matrix: {:?}", interp_matrix);
+                let interp_solution = interp_matrix.dot(&solution_slice);
+                println!("interp_solution: {:?}", interp_solution);
+            }
+
             self.current_time += dt;
             self.current_step += 1;
             println!("step: {}, time: {}", self.current_step, self.current_time);
@@ -449,3 +470,4 @@ impl ADER1DScalar for Disc1dBurgers<'_> {
 }
 impl ADER1DMatrices for Disc1dBurgers<'_> {}
 impl Geometric1D for Disc1dBurgers<'_> {}
+impl ADER1DShockTracking for Disc1dBurgers<'_> {}
