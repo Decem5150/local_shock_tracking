@@ -179,8 +179,6 @@ pub trait Basis {
         v: ArrayView2<f64>,
     ) -> (Array2<f64>, Array2<f64>) {
         let (vr, vs) = Self::grad_vandermonde_2d(n, r, s);
-        println!("vr: {:?}", vr);
-        println!("vs: {:?}", vs);
         // We want to compute differentiation matrices Dr and Ds such that:
         // Dr * V = Vr  =>  V.t() * Dr.t() = Vr.t()
         // Ds * V = Vs  =>  V.t() * Ds.t() = Vs.t()

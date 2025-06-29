@@ -3,10 +3,7 @@ use ndarray::Array3;
 use crate::{
     disc::{
         advection1d_space_time_tri::Disc1dAdvectionSpaceTimeTri,
-        basis::{
-            lagrange1d::{LagrangeBasis1D, LagrangeBasis1DLobatto},
-            triangle::TriangleBasis,
-        },
+        basis::triangle::TriangleBasis,
         burgers1d_space_time::Disc1dBurgers1dSpaceTime,
         mesh::{
             mesh1d::Mesh1d,
@@ -17,8 +14,8 @@ use crate::{
     solver::{ShockTrackingSolverTri, SolverParameters},
 };
 
-pub fn initialize_params() -> SolverParameters {
-    let solver_param_parser = SolverParamParser::parse("inputs/solverparam.json");
+pub fn initialize_params_by_file(file_path: &str) -> SolverParameters {
+    let solver_param_parser = SolverParamParser::parse(file_path);
     let polynomial_order = solver_param_parser.polynomial_order;
     let solver_params = SolverParameters {
         cfl: solver_param_parser.cfl,
@@ -30,8 +27,8 @@ pub fn initialize_params() -> SolverParameters {
 
     solver_params
 }
-pub fn initialize_params_advection() -> SolverParameters {
-    let polynomial_order = 3;
+pub fn initialize_params() -> SolverParameters {
+    let polynomial_order = 2;
     let solver_params = SolverParameters {
         cfl: 1.0,
         final_time: 0.0,
@@ -41,12 +38,7 @@ pub fn initialize_params_advection() -> SolverParameters {
     };
     solver_params
 }
-pub fn initialize_basis(cell_gp_num: usize) -> LagrangeBasis1DLobatto {
-    LagrangeBasis1DLobatto::new(cell_gp_num)
-}
-pub fn initialize_enriched_basis(enriched_cell_gp_num: usize) -> LagrangeBasis1DLobatto {
-    LagrangeBasis1DLobatto::new(enriched_cell_gp_num)
-}
+
 pub fn initialize_mesh1d(node_num: usize, left_coord: f64, right_coord: f64) -> Mesh1d {
     Mesh1d::new(node_num, left_coord, right_coord)
 }
