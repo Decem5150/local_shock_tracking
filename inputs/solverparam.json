@@ -2,5 +2,5 @@
     "polynomial_order": 2,
     "cfl": 0.5,
     "final_time": 0.03,
-    "final_step": 30
+    "final_step": 1
 }

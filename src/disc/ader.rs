@@ -1,7 +1,9 @@
-use ndarray::{Array1, Array2, ArrayView2, linalg::kron};
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2, linalg::kron};
 use ndarray_linalg::Inverse;
 
-use crate::disc::basis::{lagrange1d::LobattoBasis, quadrilateral::QuadrilateralBasis};
+use crate::disc::basis::{
+    Basis, lagrange1d::LobattoBasis, quadrilateral::QuadrilateralBasis, triangle::TriangleBasis,
+};
 
 pub trait ADER1DScalar {
     fn physical_flux(&self, u: f64) -> f64;
@@ -65,5 +67,32 @@ pub trait ADER1DMatrices {
         };
 
         kron(&time_basis_at_zero, &space_mass_mat)
+    }
+}
+pub trait ADER1DShockTracking {
+    fn compute_subpoint_coords(
+        target_basis: &LobattoBasis,
+        vertex_coords: ArrayView1<f64>, // local coordinates inside the element
+    ) -> Array1<f64> {
+        let n_subpoints = target_basis.xi.len() * (vertex_coords.len() - 1);
+        let mut coords = Array1::zeros(n_subpoints);
+        for ivertex in 0..vertex_coords.len() - 1 {
+            for inode in 0..target_basis.xi.len() {
+                coords[ivertex * target_basis.xi.len() + inode] = vertex_coords[ivertex]
+                    + target_basis.xi[inode]
+                        * (vertex_coords[ivertex + 1] - vertex_coords[ivertex]);
+            }
+        }
+        coords
+    }
+    fn compute_interp_matrix(
+        n: usize,
+        inv_vandermonde: ArrayView2<f64>,
+        r: ArrayView1<f64>,
+    ) -> Array2<f64> {
+        let r_map = r.mapv(|v| 2.0 * v - 1.0);
+        let v = LobattoBasis::vandermonde1d(n, r_map.view());
+        let interp_matrix = v.dot(&inv_vandermonde);
+        interp_matrix
     }
 }
