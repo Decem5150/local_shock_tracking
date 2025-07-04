@@ -4,8 +4,10 @@ mod flux;
 mod precompute_matrix;
 mod riemann_solver;
 // mod shock_tracking;
-use super::mesh::mesh1d::Mesh1d;
-use crate::disc::ader::ADER1DShockTracking;
+use super::mesh::{
+    mesh1d::Mesh1d,
+    mesh2d::{Mesh2d, TriangleElement},
+};
 use crate::disc::basis::quadrilateral::QuadrilateralBasis;
 use crate::disc::geometric::Geometric1D;
 use crate::disc::{
@@ -13,6 +15,7 @@ use crate::disc::{
     basis::lagrange1d::LobattoBasis,
 };
 use crate::solver::SolverParameters;
+use crate::{disc::ader::ADER1DShockTracking, solver::ShockTrackingSolverTri};
 use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, ArrayViewMut3, Axis, s};
 use ndarray_linalg::Inverse;
 use riemann_solver::rusanov::rusanov;
@@ -307,7 +310,7 @@ impl<'a> Disc1dBurgers<'a> {
                 }
             }
             */
-
+            /*
             {
                 let ielem = 0;
                 let solution_slice = solutions.slice(s![ielem, .., 0]);
@@ -325,6 +328,7 @@ impl<'a> Disc1dBurgers<'a> {
                 let interp_solution = interp_matrix.dot(&solution_slice);
                 println!("interp_solution: {:?}", interp_solution);
             }
+            */
 
             self.current_time += dt;
             self.current_step += 1;

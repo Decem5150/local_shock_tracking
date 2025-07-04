@@ -3,6 +3,7 @@ use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use ndarray_linalg::Inverse;
 
 pub struct LobattoBasis {
+    pub n: usize,
     pub xi: Array1<f64>,
     pub weights: Array1<f64>,
     pub vandermonde: Array2<f64>,
@@ -22,6 +23,7 @@ impl LobattoBasis {
         let dxi = Self::dmatrix_1d(n, xi.view(), vandermonde.view());
         println!("dxi: {:?}", dxi);
         LobattoBasis {
+            n,
             xi,
             weights,
             vandermonde,

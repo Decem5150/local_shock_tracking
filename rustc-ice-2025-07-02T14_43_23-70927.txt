@@ -1,0 +1,52 @@
+thread 'coordinator' panicked at compiler/rustc_codegen_llvm/src/builder/autodiff.rs:227:13:
+compiler/rustc_codegen_llvm/src/builder/autodiff.rs:227:13: sret in inner function
+stack backtrace:
+   0:     0x7f847178ca35 - std::backtrace::Backtrace::create::hef9254167571e541
+   1:     0x7f847178c985 - std::backtrace::Backtrace::force_capture::h34183cdc1af3f71d
+   2:     0x7f846df781e9 - std[4ece947bc34e96db]::panicking::update_hook::<alloc[fd9347d1b2560651]::boxed::Box<rustc_driver_impl[2c3b92a81167945b]::install_ice_hook::{closure#1}>>::{closure#0}
+   3:     0x7f84717a97c3 - std::panicking::rust_panic_with_hook::ha891520ba817caf1
+   4:     0x7f847122e241 - std[4ece947bc34e96db]::panicking::begin_panic::<alloc[fd9347d1b2560651]::string::String>::{closure#0}
+   5:     0x7f847122cdb6 - std[4ece947bc34e96db]::sys::backtrace::__rust_end_short_backtrace::<std[4ece947bc34e96db]::panicking::begin_panic<alloc[fd9347d1b2560651]::string::String>::{closure#0}, !>
+   6:     0x7f846deaebda - std[4ece947bc34e96db]::panicking::begin_panic::<alloc[fd9347d1b2560651]::string::String>
+   7:     0x7f84711a65f4 - rustc_middle[6948f6fc516a3dc1]::util::bug::opt_span_bug_fmt::<rustc_span[e168cdc50bf43021]::span_encoding::Span>::{closure#0}
+   8:     0x7f84711a436e - rustc_middle[6948f6fc516a3dc1]::ty::context::tls::with_opt::<rustc_middle[6948f6fc516a3dc1]::util::bug::opt_span_bug_fmt<rustc_span[e168cdc50bf43021]::span_encoding::Span>::{closure#0}, !>::{closure#0}
+   9:     0x7f84711a432b - rustc_middle[6948f6fc516a3dc1]::ty::context::tls::with_context_opt::<rustc_middle[6948f6fc516a3dc1]::ty::context::tls::with_opt<rustc_middle[6948f6fc516a3dc1]::util::bug::opt_span_bug_fmt<rustc_span[e168cdc50bf43021]::span_encoding::Span>::{closure#0}, !>::{closure#0}, !>
+  10:     0x7f846de962e2 - rustc_middle[6948f6fc516a3dc1]::util::bug::bug_fmt
+  11:     0x7f846e2cd6e0 - rustc_codegen_llvm[b2bb2bce5691f737]::builder::autodiff::differentiate
+  12:     0x7f846e3833c9 - <rustc_codegen_llvm[b2bb2bce5691f737]::LlvmCodegenBackend as rustc_codegen_ssa[b85ee4f98893541d]::traits::write::WriteBackendMethods>::autodiff
+  13:     0x7f846e38bcdf - <rustc_codegen_ssa[b85ee4f98893541d]::back::lto::LtoModuleCodegen<rustc_codegen_llvm[b2bb2bce5691f737]::LlvmCodegenBackend>>::autodiff
+  14:     0x7f846e375908 - rustc_codegen_ssa[b85ee4f98893541d]::back::write::start_executing_work::<rustc_codegen_llvm[b2bb2bce5691f737]::LlvmCodegenBackend>::{closure#5}
+  15:     0x7f846e36bb55 - std[4ece947bc34e96db]::sys::backtrace::__rust_begin_short_backtrace::<<rustc_codegen_llvm[b2bb2bce5691f737]::LlvmCodegenBackend as rustc_codegen_ssa[b85ee4f98893541d]::traits::backend::ExtraBackendMethods>::spawn_named_thread<rustc_codegen_ssa[b85ee4f98893541d]::back::write::start_executing_work<rustc_codegen_llvm[b2bb2bce5691f737]::LlvmCodegenBackend>::{closure#5}, core[bdde32e857371a49]::result::Result<rustc_codegen_ssa[b85ee4f98893541d]::back::write::CompiledModules, ()>>::{closure#0}, core[bdde32e857371a49]::result::Result<rustc_codegen_ssa[b85ee4f98893541d]::back::write::CompiledModules, ()>>
+  16:     0x7f846e37a0e7 - <<std[4ece947bc34e96db]::thread::Builder>::spawn_unchecked_<<rustc_codegen_llvm[b2bb2bce5691f737]::LlvmCodegenBackend as rustc_codegen_ssa[b85ee4f98893541d]::traits::backend::ExtraBackendMethods>::spawn_named_thread<rustc_codegen_ssa[b85ee4f98893541d]::back::write::start_executing_work<rustc_codegen_llvm[b2bb2bce5691f737]::LlvmCodegenBackend>::{closure#5}, core[bdde32e857371a49]::result::Result<rustc_codegen_ssa[b85ee4f98893541d]::back::write::CompiledModules, ()>>::{closure#0}, core[bdde32e857371a49]::result::Result<rustc_codegen_ssa[b85ee4f98893541d]::back::write::CompiledModules, ()>>::{closure#1} as core[bdde32e857371a49]::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+  17:     0x7f84717ac80b - std::sys::pal::unix::thread::Thread::new::thread_start::hd325dd57d8c72c6b
+  18:     0x7f846d466aa4 - <unknown>
+  19:     0x7f846d4f3c3c - <unknown>
+  20:                0x0 - <unknown>
+
+
+rustc version: 1.90.0-nightly (71e4c005c 2025-07-01)
+platform: x86_64-unknown-linux-gnuthread 'rustc' panicked at /home/tensorhauer/MyCodes/rust/compiler/rustc_codegen_ssa/src/back/write.rs:2048:17:
+/home/tensorhauer/MyCodes/rust/compiler/rustc_codegen_ssa/src/back/write.rs:2048:17: panic during codegen/LLVM phase
+stack backtrace:
+   0:     0x7f847178ca35 - std::backtrace::Backtrace::create::hef9254167571e541
+   1:     0x7f847178c985 - std::backtrace::Backtrace::force_capture::h34183cdc1af3f71d
+   2:     0x7f846df781e9 - std[4ece947bc34e96db]::panicking::update_hook::<alloc[fd9347d1b2560651]::boxed::Box<rustc_driver_impl[2c3b92a81167945b]::install_ice_hook::{closure#1}>>::{closure#0}
+   3:     0x7f84717a97c3 - std::panicking::rust_panic_with_hook::ha891520ba817caf1
+   4:     0x7f847122e241 - std[4ece947bc34e96db]::panicking::begin_panic::<alloc[fd9347d1b2560651]::string::String>::{closure#0}
+   5:     0x7f847122cdb6 - std[4ece947bc34e96db]::sys::backtrace::__rust_end_short_backtrace::<std[4ece947bc34e96db]::panicking::begin_panic<alloc[fd9347d1b2560651]::string::String>::{closure#0}, !>
+   6:     0x7f846deaebda - std[4ece947bc34e96db]::panicking::begin_panic::<alloc[fd9347d1b2560651]::string::String>
+   7:     0x7f84711a65f4 - rustc_middle[6948f6fc516a3dc1]::util::bug::opt_span_bug_fmt::<rustc_span[e168cdc50bf43021]::span_encoding::Span>::{closure#0}
+   8:     0x7f84711a436e - rustc_middle[6948f6fc516a3dc1]::ty::context::tls::with_opt::<rustc_middle[6948f6fc516a3dc1]::util::bug::opt_span_bug_fmt<rustc_span[e168cdc50bf43021]::span_encoding::Span>::{closure#0}, !>::{closure#0}
+   9:     0x7f84711a432b - rustc_middle[6948f6fc516a3dc1]::ty::context::tls::with_context_opt::<rustc_middle[6948f6fc516a3dc1]::ty::context::tls::with_opt<rustc_middle[6948f6fc516a3dc1]::util::bug::opt_span_bug_fmt<rustc_span[e168cdc50bf43021]::span_encoding::Span>::{closure#0}, !>::{closure#0}, !>
+  10:     0x7f846de962e2 - rustc_middle[6948f6fc516a3dc1]::util::bug::bug_fmt
+  11:     0x7f846e3848cd - <rustc_codegen_llvm[b2bb2bce5691f737]::LlvmCodegenBackend as rustc_codegen_ssa[b85ee4f98893541d]::traits::backend::CodegenBackend>::join_codegen
+  12:     0x7f846e1e5c28 - <rustc_interface[e15c913e37636ea4]::queries::Linker>::link
+  13:     0x7f846dfa8c21 - rustc_interface[e15c913e37636ea4]::interface::run_compiler::<(), rustc_driver_impl[2c3b92a81167945b]::run_compiler::{closure#0}>::{closure#1}
+  14:     0x7f846df9fb7c - <scoped_tls[75f2020d1a01ac4]::ScopedKey<rustc_span[e168cdc50bf43021]::SessionGlobals>>::set::<rustc_interface[e15c913e37636ea4]::util::run_in_thread_with_globals<rustc_interface[e15c913e37636ea4]::util::run_in_thread_pool_with_globals<rustc_interface[e15c913e37636ea4]::interface::run_compiler<(), rustc_driver_impl[2c3b92a81167945b]::run_compiler::{closure#0}>::{closure#1}, ()>::{closure#0}, ()>::{closure#0}::{closure#0}::{closure#0}, ()>
+  15:     0x7f846df8c03e - rustc_span[e168cdc50bf43021]::create_session_globals_then::<(), rustc_interface[e15c913e37636ea4]::util::run_in_thread_with_globals<rustc_interface[e15c913e37636ea4]::util::run_in_thread_pool_with_globals<rustc_interface[e15c913e37636ea4]::interface::run_compiler<(), rustc_driver_impl[2c3b92a81167945b]::run_compiler::{closure#0}>::{closure#1}, ()>::{closure#0}, ()>::{closure#0}::{closure#0}::{closure#0}>
+  16:     0x7f846dfa6a49 - std[4ece947bc34e96db]::sys::backtrace::__rust_begin_short_backtrace::<rustc_interface[e15c913e37636ea4]::util::run_in_thread_with_globals<rustc_interface[e15c913e37636ea4]::util::run_in_thread_pool_with_globals<rustc_interface[e15c913e37636ea4]::interface::run_compiler<(), rustc_driver_impl[2c3b92a81167945b]::run_compiler::{closure#0}>::{closure#1}, ()>::{closure#0}, ()>::{closure#0}::{closure#0}, ()>
+  17:     0x7f846dfa9a1e - <<std[4ece947bc34e96db]::thread::Builder>::spawn_unchecked_<rustc_interface[e15c913e37636ea4]::util::run_in_thread_with_globals<rustc_interface[e15c913e37636ea4]::util::run_in_thread_pool_with_globals<rustc_interface[e15c913e37636ea4]::interface::run_compiler<(), rustc_driver_impl[2c3b92a81167945b]::run_compiler::{closure#0}>::{closure#1}, ()>::{closure#0}, ()>::{closure#0}::{closure#0}, ()>::{closure#1} as core[bdde32e857371a49]::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+  18:     0x7f84717ac80b - std::sys::pal::unix::thread::Thread::new::thread_start::hd325dd57d8c72c6b
+  19:     0x7f846d466aa4 - <unknown>
+  20:     0x7f846d4f3c3c - <unknown>
+  21:                0x0 - <unknown>

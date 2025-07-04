@@ -1,4 +1,4 @@
-use ndarray::{Array1, Array2, ArrayView2, ArrayViewMut2, s};
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, s};
 use ndarray_linalg::Inverse;
 use std::autodiff::autodiff_reverse;
 
@@ -19,6 +19,7 @@ pub struct Disc1dBurgers1dSpaceTime<'a> {
     interp_node_to_enriched_quadrature: Array2<f64>,
     pub mesh: &'a mut Mesh2d<TriangleElement>,
     solver_param: &'a SolverParameters,
+    initial_condition: Array1<f64>,
 }
 impl<'a> Disc1dBurgers1dSpaceTime<'a> {
     pub fn new(
@@ -26,6 +27,7 @@ impl<'a> Disc1dBurgers1dSpaceTime<'a> {
         enriched_basis: TriangleBasis,
         mesh: &'a mut Mesh2d<TriangleElement>,
         solver_param: &'a SolverParameters,
+        initial_condition: ArrayView1<f64>,
     ) -> Self {
         let interp_node_to_cubature = Self::compute_interp_matrix_2d(
             solver_param.polynomial_order,
@@ -52,6 +54,7 @@ impl<'a> Disc1dBurgers1dSpaceTime<'a> {
             inv_vandermonde_1d.view(),
             enriched_gauss_lobatto_points.view(),
         );
+        let initial_condition = initial_condition.to_owned();
         Self {
             basis,
             enriched_basis,
@@ -60,6 +63,7 @@ impl<'a> Disc1dBurgers1dSpaceTime<'a> {
             interp_node_to_enriched_quadrature,
             mesh,
             solver_param,
+            initial_condition,
         }
     }
 }
@@ -84,6 +88,9 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
     }
     fn mesh_mut(&mut self) -> &mut Mesh2d<TriangleElement> {
         self.mesh
+    }
+    fn initial_condition(&self) -> &Array1<f64> {
+        &self.initial_condition
     }
     #[autodiff_reverse(
         dvolume, Const, Const, Const, Duplicated, Duplicated, Duplicated, Active
@@ -139,12 +146,26 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
         let result = 0.5 * (flux_l + flux_r + abs_beta * (ul - ur));
         result
     }
-    #[autodiff_reverse(dbnd_flux, Const, Active, Active, Active, Active, Active, Active)]
-    fn compute_boundary_flux(&self, u: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64 {
+    #[autodiff_reverse(
+        dbnd_flux, Const, Active, Const, Active, Active, Active, Active, Active
+    )]
+    fn compute_boundary_flux(&self, u: f64, ub: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64 {
         let normal = Self::compute_normal(x0, y0, x1, y1);
-        let beta = [0.5 * u, 1.0];
-        let beta_dot_normal = beta[0] * normal[0] + beta[1] * normal[1];
-        let result = beta_dot_normal * u;
+        let nx = normal[0];
+        let nt = normal[1];
+
+        // Physical flux: F(u) = (0.5*u^2, u)
+        let flux_l = 0.5 * u * u * nx + u * nt;
+        let flux_r = 0.5 * ub * ub * nx + ub * nt;
+
+        // Roe-averaged wave speed: beta = u_avg * nx + nt
+        let u_avg = 0.5 * (u + ub);
+        let beta = u_avg * nx + nt;
+
+        // Smoothed absolute value: |x| approx x * tanh(k*x)
+        let abs_beta = beta * (100.0 * beta).tanh();
+
+        let result = 0.5 * (flux_l + flux_r + abs_beta * (u - ub));
         result
     }
     #[autodiff_reverse(dscaling, Const, Const, Const, Const, Duplicated, Duplicated, Active)]

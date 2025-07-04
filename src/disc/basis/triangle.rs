@@ -3,8 +3,12 @@ use std::f64::consts::PI;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, array, s};
 use ndarray_linalg::{Inverse, Solve};
 
-use crate::disc::{basis::Basis, gauss_points::lobatto_points::get_lobatto_points_interval};
+use crate::disc::{
+    basis::{Basis, lagrange1d::LobattoBasis},
+    gauss_points::lobatto_points::get_lobatto_points_interval,
+};
 pub struct TriangleBasis {
+    pub n: usize,
     pub r: Array1<f64>,
     pub s: Array1<f64>,
     pub vandermonde: Array2<f64>,
@@ -19,6 +23,7 @@ pub struct TriangleBasis {
     pub cub_w: Array1<f64>,
     pub dr_cub: Array2<f64>,
     pub ds_cub: Array2<f64>,
+    pub basis1d: LobattoBasis,
 }
 impl TriangleBasis {
     pub fn new(n: usize) -> Self {
@@ -36,7 +41,9 @@ impl TriangleBasis {
         let (cub_r, cub_s, cub_w) = Self::cubature_points(2 * n - 1);
         let (dr_cub, ds_cub) =
             Self::dmatrices_2d(n, cub_r.view(), cub_s.view(), vandermonde.view());
+        let basis1d = LobattoBasis::new(n);
         Self {
+            n,
             r,
             s,
             vandermonde,
@@ -51,6 +58,7 @@ impl TriangleBasis {
             cub_w,
             dr_cub,
             ds_cub,
+            basis1d,
         }
     }
     fn compute_l(v: ArrayView2<f64>) -> Array2<f64> {

@@ -1,6 +1,6 @@
 pub mod ader;
 pub mod basis;
-// pub mod boundary_conditions;
+pub mod boundary;
 // pub mod flux;
 pub mod gauss_points;
 pub mod geometric;
@@ -13,11 +13,14 @@ pub mod burgers1d_space_time;
 // pub mod euler1d;
 use faer::{Col, linalg::solvers::DenseSolveCore, prelude::Solve};
 use faer_ext::{IntoFaer, IntoNdarray};
-use ndarray::{Array, Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, Axis, concatenate, s};
+use nalgebra::{DMatrix, DVector, dvector};
+use ndarray::{
+    Array, Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, Axis, array, concatenate, s,
+};
 use ndarray_stats::QuantileExt;
 
 use crate::disc::{
-    basis::{Basis, quadrilateral::QuadrilateralBasis, triangle::TriangleBasis},
+    basis::{Basis, lagrange1d::LobattoBasis, triangle::TriangleBasis},
     geometric::Geometric2D,
     mesh::mesh2d::{Mesh2d, TriangleElement},
 };
@@ -87,39 +90,63 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
             residuals[(iright, 0)] -= flux * edge_length;
         }
 
-        // Inflow boundaries
-        for bnd in &self.mesh().flow_in_bnds {
-            let u_bnd = bnd.value;
+        // Constant boundaries
+        for bnd in &self.mesh().constant_bnds {
+            let ub = bnd.value;
             for &iedge in &bnd.iedges {
                 let edge = &self.mesh().edges[iedge];
                 let ielem = edge.parents[0];
+                let u = solutions[(ielem, 0)];
                 let n0 = &self.mesh().nodes[edge.inodes[0]];
                 let n1 = &self.mesh().nodes[edge.inodes[1]];
-
                 let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
 
                 // For boundary edges, the node ordering is assumed to be counter-clockwise
                 // for the parent element, so the normal computed from (n0, n1) is outward-pointing.
-                let flux = self.compute_boundary_flux(u_bnd, n0.x, n1.x, n0.y, n1.y);
+                let flux = self.compute_boundary_flux(u, ub, n0.x, n1.x, n0.y, n1.y);
 
                 residuals[(ielem, 0)] += flux * edge_length;
             }
         }
-
-        // Outflow boundaries
-        for bnd in &self.mesh().flow_out_bnds {
-            for &iedge in &bnd.iedges {
+        // Polynomial boundaries
+        for bnd in &self.mesh().polynomial_bnds {
+            let iedges = &bnd.iedges;
+            let nodal_coeffs = &bnd.nodal_coeffs;
+            for &iedge in iedges {
                 let edge = &self.mesh().edges[iedge];
                 let ielem = edge.parents[0];
-                let u_in = solutions[(ielem, 0)];
+                let u = solutions[(ielem, 0)];
                 let n0 = &self.mesh().nodes[edge.inodes[0]];
                 let n1 = &self.mesh().nodes[edge.inodes[1]];
-
                 let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
-
-                // For boundary edges, the node ordering is assumed to be counter-clockwise
-                // for the parent element, so the normal computed from (n0, n1) is outward-pointing.
-                let flux = self.compute_boundary_flux(u_in, n0.x, n1.x, n0.y, n1.y);
+                let (coord0, coord1) = match bnd.normal {
+                    // Initial condition
+                    [0.0, -1.0] => (
+                        self.mesh().nodes[edge.inodes[0]].x,
+                        self.mesh().nodes[edge.inodes[1]].x,
+                    ),
+                    // Right boundary
+                    [1.0, 0.0] => (
+                        self.mesh().nodes[edge.inodes[0]].y,
+                        self.mesh().nodes[edge.inodes[1]].y,
+                    ),
+                    // Left boundary
+                    [-1.0, 0.0] => (
+                        self.mesh().nodes[edge.inodes[0]].y,
+                        self.mesh().nodes[edge.inodes[1]].y,
+                    ),
+                    _ => panic!("Invalid boundary normal"),
+                };
+                let xi = array![0.5];
+                let bnd_value = compute_boundary_value_by_interpolation(
+                    nodal_coeffs.view(),
+                    self.basis().basis1d.n,
+                    xi.view(),
+                    self.basis().basis1d.inv_vandermonde.view(),
+                    coord0,
+                    coord1,
+                );
+                let flux = self.compute_boundary_flux(u, bnd_value[0], n0.x, n1.x, n0.y, n1.y);
 
                 residuals[(ielem, 0)] += flux * edge_length;
             }
@@ -136,6 +163,7 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
     fn interp_node_to_enriched_quadrature(&self) -> &Array2<f64>;
     fn mesh(&self) -> &Mesh2d<TriangleElement>;
     fn mesh_mut(&mut self) -> &mut Mesh2d<TriangleElement>;
+    fn initial_condition(&self) -> &Array1<f64>;
 
     fn compute_interp_matrix_1d(
         n: usize,
@@ -304,58 +332,11 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                     0.5 * right_edge_length * edge_weights[i] * right_transformed_flux;
             }
         }
-        // flow in boundary
-        for ibnd in mesh.flow_in_bnds.iter() {
-            let iedges = &ibnd.iedges;
-            let value = ibnd.value;
-            for &iedge in iedges.iter() {
-                let edge = &mesh.edges[iedge];
-                let ielem = edge.parents[0];
-                let elem = &mesh.elements[ielem];
-                let inodes = &elem.inodes;
-                let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
-                let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
-                let nodes_along_edges = &basis.nodes_along_edges;
-                let local_ids = &edge.local_ids;
-                let ref_normal = Self::compute_ref_normal(local_ids[0]);
-                let edge_length = Self::compute_ref_edge_length(local_ids[0]);
-                let xi_slice = basis.r.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                let eta_slice = basis.s.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                for i in 0..nedge_basis {
-                    let xi = xi_slice[i];
-                    let eta = eta_slice[i];
-                    let boundary_flux = self.compute_boundary_flux(
-                        value,
-                        x_slice[local_ids[0]],
-                        x_slice[(local_ids[0] + 1) % 3],
-                        y_slice[local_ids[0]],
-                        y_slice[(local_ids[0] + 1) % 3],
-                    );
-                    let scaling =
-                        self.compute_flux_scaling(xi, eta, ref_normal, &x_slice, &y_slice);
-                    let transformed_flux = boundary_flux * scaling;
-                    let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
-                    residuals[(ielem, itest_func)] +=
-                        0.5 * edge_length * edge_weights[i] * transformed_flux;
-                }
-            }
-        }
-        // flow out boundary
-        for ibnd in mesh.flow_out_bnds.iter() {
-            let iedges = &ibnd.iedges;
-            for &iedge in iedges.iter() {
+        // Constant boundaries
+        for bnd in &mesh.constant_bnds {
+            let iedges = &bnd.iedges;
+            let bnd_value = bnd.value;
+            for &iedge in iedges {
                 let edge = &mesh.edges[iedge];
                 let ielem = edge.parents[0];
                 let elem = &mesh.elements[ielem];
@@ -400,10 +381,93 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                     let eta = eta_slice[i];
                     let boundary_flux = self.compute_boundary_flux(
                         sol_slice[i],
+                        bnd_value,
                         x_slice[local_ids[0]],
                         x_slice[(local_ids[0] + 1) % 3],
                         y_slice[local_ids[0]],
                         y_slice[(local_ids[0] + 1) % 3],
+                    );
+                    let scaling =
+                        self.compute_flux_scaling(xi, eta, ref_normal, &x_slice, &y_slice);
+                    let transformed_flux = boundary_flux * scaling;
+                    let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
+                    residuals[(ielem, itest_func)] +=
+                        0.5 * edge_length * edge_weights[i] * transformed_flux;
+                }
+            }
+        }
+
+        // Polynomial boundaries
+        for bnd in &mesh.polynomial_bnds {
+            let iedges = &bnd.iedges;
+            let nodal_coeffs = &bnd.nodal_coeffs;
+            for &iedge in iedges {
+                let edge = &mesh.edges[iedge];
+                let ielem = edge.parents[0];
+                let elem = &mesh.elements[ielem];
+                let inodes = &elem.inodes;
+                let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
+                let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
+                let sol_nodes_along_edges = &self.basis().nodes_along_edges;
+                let nodes_along_edges = &basis.nodes_along_edges;
+                let local_ids = &edge.local_ids;
+                let ref_normal = Self::compute_ref_normal(local_ids[0]);
+                let edge_length = Self::compute_ref_edge_length(local_ids[0]);
+                let sol_slice = {
+                    let sol_slice = solutions.slice(s![ielem, ..]).select(
+                        Axis(0),
+                        sol_nodes_along_edges
+                            .slice(s![local_ids[0], ..])
+                            .as_slice()
+                            .unwrap(),
+                    );
+                    if is_enriched {
+                        self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                    } else {
+                        sol_slice
+                    }
+                };
+                let xi_slice = basis.r.select(
+                    Axis(0),
+                    nodes_along_edges
+                        .slice(s![local_ids[0], ..])
+                        .as_slice()
+                        .unwrap(),
+                );
+                let eta_slice = basis.s.select(
+                    Axis(0),
+                    nodes_along_edges
+                        .slice(s![local_ids[0], ..])
+                        .as_slice()
+                        .unwrap(),
+                );
+                let (coord0, coord1) = match bnd.normal {
+                    // Initial condition
+                    [0.0, -1.0] => (mesh.nodes[edge.inodes[0]].x, mesh.nodes[edge.inodes[1]].x),
+                    // Right boundary
+                    [1.0, 0.0] => (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y),
+                    // Left boundary
+                    [-1.0, 0.0] => (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y),
+                    _ => panic!("Invalid boundary normal"),
+                };
+                let bnd_values = compute_boundary_value_by_interpolation(
+                    nodal_coeffs.view(),
+                    self.basis().basis1d.n,
+                    basis.basis1d.xi.view(),
+                    self.basis().basis1d.inv_vandermonde.view(),
+                    coord0,
+                    coord1,
+                );
+                for i in 0..nedge_basis {
+                    let xi = xi_slice[i];
+                    let eta = eta_slice[i];
+                    let boundary_flux = self.compute_boundary_flux(
+                        sol_slice[i],
+                        bnd_values[i],
+                        mesh.nodes[edge.inodes[0]].x,
+                        mesh.nodes[edge.inodes[1]].x,
+                        mesh.nodes[edge.inodes[0]].y,
+                        mesh.nodes[edge.inodes[1]].y,
                     );
                     let scaling =
                         self.compute_flux_scaling(xi, eta, ref_normal, &x_slice, &y_slice);
@@ -703,6 +767,281 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                 }
             }
         }
+        // Constant boundaries
+        for bnd in &self.mesh().constant_bnds {
+            let iedges = &bnd.iedges;
+            let bnd_value = bnd.value;
+            for &iedge in iedges {
+                let edge = &self.mesh().edges[iedge];
+                let ielem = edge.parents[0];
+                let elem = &self.mesh().elements[ielem];
+                let inodes = &elem.inodes;
+                let x_slice: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[inodes[i]].x);
+                let y_slice: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[inodes[i]].y);
+                let sol_nodes_along_edges = &self.basis().nodes_along_edges;
+                let nodes_along_edges = &basis.nodes_along_edges;
+                let local_ids = &edge.local_ids;
+                let ref_normal = Self::compute_ref_normal(local_ids[0]);
+                let edge_length = Self::compute_ref_edge_length(local_ids[0]);
+                let sol_slice = {
+                    let sol_slice = solutions.slice(s![ielem, ..]).select(
+                        Axis(0),
+                        sol_nodes_along_edges
+                            .slice(s![local_ids[0], ..])
+                            .as_slice()
+                            .unwrap(),
+                    );
+                    if is_enriched {
+                        self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                    } else {
+                        sol_slice
+                    }
+                };
+                let xi_slice = basis.r.select(
+                    Axis(0),
+                    nodes_along_edges
+                        .slice(s![local_ids[0], ..])
+                        .as_slice()
+                        .unwrap(),
+                );
+                let eta_slice = basis.s.select(
+                    Axis(0),
+                    nodes_along_edges
+                        .slice(s![local_ids[0], ..])
+                        .as_slice()
+                        .unwrap(),
+                );
+                for i in 0..nedge_basis {
+                    let xi = xi_slice[i];
+                    let eta = eta_slice[i];
+                    let (boundary_flux, dflux_du, dflux_dx0, dflux_dx1, dflux_dy0, dflux_dy1): (
+                        f64,
+                        f64,
+                        f64,
+                        f64,
+                        f64,
+                        f64,
+                    ) = self.dbnd_flux(
+                        sol_slice[i],
+                        bnd_value,
+                        x_slice[local_ids[0]],
+                        x_slice[(local_ids[0] + 1) % 3],
+                        y_slice[local_ids[0]],
+                        y_slice[(local_ids[0] + 1) % 3],
+                        1.0,
+                    );
+                    let mut dflux_dx = [0.0; 3];
+                    let mut dflux_dy = [0.0; 3];
+                    dflux_dx[local_ids[0]] = dflux_dx0;
+                    dflux_dx[(local_ids[0] + 1) % 3] = dflux_dx1;
+                    dflux_dy[local_ids[0]] = dflux_dy0;
+                    dflux_dy[(local_ids[0] + 1) % 3] = dflux_dy1;
+
+                    let mut dscaling_dx = [0.0; 3];
+                    let mut dscaling_dy = [0.0; 3];
+                    let scaling: f64 = self.dscaling(
+                        xi,
+                        eta,
+                        ref_normal,
+                        &x_slice,
+                        dscaling_dx.as_mut_slice(),
+                        &y_slice,
+                        dscaling_dy.as_mut_slice(),
+                        1.0,
+                    );
+                    let transformed_flux = boundary_flux * scaling;
+
+                    let dtransformed_flux_du = dflux_du * scaling;
+                    let dtransformed_flux_dx = &(&ArrayView1::from(&dflux_dx) * scaling)
+                        + &(&ArrayView1::from(&dscaling_dx) * boundary_flux);
+                    let dtransformed_flux_dy = &(&ArrayView1::from(&dflux_dy) * scaling)
+                        + &(&ArrayView1::from(&dscaling_dy) * boundary_flux);
+
+                    let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
+
+                    residuals[(ielem, itest_func)] +=
+                        0.5 * edge_length * edge_weights[i] * transformed_flux;
+
+                    let row_idx = ielem * ncell_basis + itest_func;
+                    for j in 0..3 {
+                        dx[(row_idx, inodes[j])] +=
+                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_dx[j];
+                        dy[(row_idx, inodes[j])] +=
+                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_dy[j];
+                    }
+
+                    if is_enriched {
+                        for (j, &isol_node) in sol_nodes_along_edges
+                            .slice(s![local_ids[0], ..])
+                            .indexed_iter()
+                        {
+                            let col_idx = ielem * unenriched_ncell_basis + isol_node;
+                            dsol[(row_idx, col_idx)] += 0.5
+                                * edge_length
+                                * edge_weights[i]
+                                * self.interp_node_to_enriched_quadrature()[(i, j)]
+                                * dtransformed_flux_du;
+                        }
+                    } else {
+                        let sol_nodes = sol_nodes_along_edges.slice(s![local_ids[0], ..]);
+                        let col_idx = ielem * ncell_basis + sol_nodes[i];
+                        dsol[(row_idx, col_idx)] +=
+                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_du;
+                    }
+                }
+            }
+        }
+        // Polynomial boundaries
+        for bnd in &self.mesh().polynomial_bnds {
+            let iedges = &bnd.iedges;
+            let nodal_coeffs = &bnd.nodal_coeffs;
+            for &iedge in iedges {
+                let edge = &self.mesh().edges[iedge];
+                let ielem = edge.parents[0];
+                let elem = &self.mesh().elements[ielem];
+                let inodes = &elem.inodes;
+                let x_slice: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[inodes[i]].x);
+                let y_slice: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[inodes[i]].y);
+                let sol_nodes_along_edges = &self.basis().nodes_along_edges;
+                let nodes_along_edges = &basis.nodes_along_edges;
+                let local_ids = &edge.local_ids;
+                let ref_normal = Self::compute_ref_normal(local_ids[0]);
+                let edge_length = Self::compute_ref_edge_length(local_ids[0]);
+                let sol_slice = {
+                    let sol_slice = solutions.slice(s![ielem, ..]).select(
+                        Axis(0),
+                        sol_nodes_along_edges
+                            .slice(s![local_ids[0], ..])
+                            .as_slice()
+                            .unwrap(),
+                    );
+                    if is_enriched {
+                        self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                    } else {
+                        sol_slice
+                    }
+                };
+                let xi_slice = basis.r.select(
+                    Axis(0),
+                    nodes_along_edges
+                        .slice(s![local_ids[0], ..])
+                        .as_slice()
+                        .unwrap(),
+                );
+                let eta_slice = basis.s.select(
+                    Axis(0),
+                    nodes_along_edges
+                        .slice(s![local_ids[0], ..])
+                        .as_slice()
+                        .unwrap(),
+                );
+                let (coord0, coord1) = match bnd.normal {
+                    // Initial condition
+                    [0.0, -1.0] => (
+                        self.mesh().nodes[edge.inodes[0]].x,
+                        self.mesh().nodes[edge.inodes[1]].x,
+                    ),
+                    // Right boundary
+                    [1.0, 0.0] => (
+                        self.mesh().nodes[edge.inodes[0]].y,
+                        self.mesh().nodes[edge.inodes[1]].y,
+                    ),
+                    // Left boundary
+                    [-1.0, 0.0] => (
+                        self.mesh().nodes[edge.inodes[0]].y,
+                        self.mesh().nodes[edge.inodes[1]].y,
+                    ),
+                    _ => panic!("Invalid boundary normal"),
+                };
+                let bnd_values = compute_boundary_value_by_interpolation(
+                    nodal_coeffs.view(),
+                    self.basis().basis1d.n,
+                    basis.basis1d.xi.view(),
+                    self.basis().basis1d.inv_vandermonde.view(),
+                    coord0,
+                    coord1,
+                );
+                for i in 0..nedge_basis {
+                    let xi = xi_slice[i];
+                    let eta = eta_slice[i];
+                    let (boundary_flux, dflux_du, dflux_dx0, dflux_dx1, dflux_dy0, dflux_dy1): (
+                        f64,
+                        f64,
+                        f64,
+                        f64,
+                        f64,
+                        f64,
+                    ) = self.dbnd_flux(
+                        sol_slice[i],
+                        bnd_values[i],
+                        x_slice[local_ids[0]],
+                        x_slice[(local_ids[0] + 1) % 3],
+                        y_slice[local_ids[0]],
+                        y_slice[(local_ids[0] + 1) % 3],
+                        1.0,
+                    );
+                    let mut dflux_dx = [0.0; 3];
+                    let mut dflux_dy = [0.0; 3];
+                    dflux_dx[local_ids[0]] = dflux_dx0;
+                    dflux_dx[(local_ids[0] + 1) % 3] = dflux_dx1;
+                    dflux_dy[local_ids[0]] = dflux_dy0;
+                    dflux_dy[(local_ids[0] + 1) % 3] = dflux_dy1;
+
+                    let mut dscaling_dx = [0.0; 3];
+                    let mut dscaling_dy = [0.0; 3];
+                    let scaling: f64 = self.dscaling(
+                        xi,
+                        eta,
+                        ref_normal,
+                        &x_slice,
+                        dscaling_dx.as_mut_slice(),
+                        &y_slice,
+                        dscaling_dy.as_mut_slice(),
+                        1.0,
+                    );
+                    let transformed_flux = boundary_flux * scaling;
+
+                    let dtransformed_flux_du = dflux_du * scaling;
+                    let dtransformed_flux_dx = &(&ArrayView1::from(&dflux_dx) * scaling)
+                        + &(&ArrayView1::from(&dscaling_dx) * boundary_flux);
+                    let dtransformed_flux_dy = &(&ArrayView1::from(&dflux_dy) * scaling)
+                        + &(&ArrayView1::from(&dscaling_dy) * boundary_flux);
+
+                    let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
+
+                    residuals[(ielem, itest_func)] +=
+                        0.5 * edge_length * edge_weights[i] * transformed_flux;
+
+                    let row_idx = ielem * ncell_basis + itest_func;
+                    for j in 0..3 {
+                        dx[(row_idx, inodes[j])] +=
+                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_dx[j];
+                        dy[(row_idx, inodes[j])] +=
+                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_dy[j];
+                    }
+
+                    if is_enriched {
+                        for (j, &isol_node) in sol_nodes_along_edges
+                            .slice(s![local_ids[0], ..])
+                            .indexed_iter()
+                        {
+                            let col_idx = ielem * unenriched_ncell_basis + isol_node;
+                            dsol[(row_idx, col_idx)] += 0.5
+                                * edge_length
+                                * edge_weights[i]
+                                * self.interp_node_to_enriched_quadrature()[(i, j)]
+                                * dtransformed_flux_du;
+                        }
+                    } else {
+                        let sol_nodes = sol_nodes_along_edges.slice(s![local_ids[0], ..]);
+                        let col_idx = ielem * ncell_basis + sol_nodes[i];
+                        dsol[(row_idx, col_idx)] +=
+                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_du;
+                    }
+                }
+            }
+        }
+        /*
         // flow in boundary
         for ibnd in self.mesh().flow_in_bnds.iter() {
             let iedges = &ibnd.iedges;
@@ -912,6 +1251,7 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                 }
             }
         }
+        */
     }
     fn volume_integral(
         &self,
@@ -933,10 +1273,11 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
         d_y: &mut [f64],
         d_retval: f64,
     ) -> f64;
-    fn compute_boundary_flux(&self, u: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64;
+    fn compute_boundary_flux(&self, u: f64, ub: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64;
     fn dbnd_flux(
         &self,
         u: f64,
+        ub: f64,
         x0: f64,
         x1: f64,
         y0: f64,
@@ -1292,4 +1633,36 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
         }
         */
     }
+}
+// #[autodiff_reverse(dinit_dx, Const, Const, Const, Const, Active, Active, Active)]
+pub fn compute_boundary_value_by_interpolation(
+    source_solution: ArrayView1<f64>,
+    n: usize,                         // order of the source basis
+    xi: ArrayView1<f64>,              // must be mapped to [0, 1] before passing in
+    inv_vandermonde: ArrayView2<f64>, // inverse of the vandermonde matrix of the source basis
+    x0: f64,
+    x1: f64,
+) -> Array1<f64> {
+    let coord = xi.mapv(|x| x * (x1 - x0) + x0);
+    let coord_mapped = coord.mapv(|x| x * 2.0 - 1.0);
+    let v = LobattoBasis::vandermonde1d(n, coord_mapped.view());
+    let interp_matrix = v.dot(&inv_vandermonde);
+    let values = interp_matrix.dot(&source_solution);
+    values
+}
+// #[autodiff_reverse(dinit_dx_nalgebra, Const, Const, Const, Const, Active, Active, Active)]
+pub fn compute_source_value_nalgebra(
+    source_solution: &DVector<f64>,
+    n: usize,
+    xi: f64, // must be mapped to [0, 1] before passing in
+    inv_vandermonde: &DMatrix<f64>,
+    x0: f64,
+    x1: f64,
+) -> f64 {
+    let coord = xi * (x1 - x0) + x0;
+    let coord_mapped = dvector![coord * 2.0 - 1.0];
+    let v = LobattoBasis::vandermonde1d_nalgebra(n, &coord_mapped);
+    let interp_matrix = v * inv_vandermonde;
+    let values = interp_matrix * source_solution;
+    values[0]
 }

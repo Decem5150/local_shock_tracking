@@ -1,3 +1,4 @@
+use nalgebra::{DMatrix, DVector};
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, array, s};
 use ndarray_linalg::{Eigh, Inverse, UPLO};
 use statrs::function::gamma::gamma;
@@ -12,6 +13,14 @@ pub trait Basis {
         for j in 0..n + 1 {
             v.column_mut(j)
                 .assign(&Self::jacobi_polynomial(r, 0.0, 0.0, j as i32));
+        }
+        v
+    }
+    fn vandermonde1d_nalgebra(n: usize, r: &DVector<f64>) -> DMatrix<f64> {
+        let mut v = DMatrix::zeros(r.len(), n + 1);
+        for j in 0..=n {
+            let p_j = Self::jacobi_polynomial_nalgebra(r, 0.0, 0.0, j as i32);
+            v.column_mut(j).copy_from(&p_j);
         }
         v
     }
@@ -99,6 +108,7 @@ pub trait Basis {
                 / (h1_for_Ak + 1.0)
                 / (h1_for_Ak + 3.0))
                 .sqrt();
+        /*
         if ak_val.is_nan() {
             // Add a check for NaN, which can happen if terms under sqrt are negative
             panic!(
@@ -106,6 +116,7 @@ pub trait Basis {
                 k_order, alpha, beta
             );
         }
+        */
         ak_val
     }
     #[allow(non_snake_case)]
@@ -155,6 +166,58 @@ pub trait Basis {
                     );
                 }
                 ((&x - bn) * pn_1 - a_n_minus_1 * pn_2) / an
+            }
+        }
+    }
+    #[allow(non_snake_case)]
+    fn jacobi_polynomial_nalgebra(x: &DVector<f64>, alpha: f64, beta: f64, n: i32) -> DVector<f64> {
+        match n {
+            0 => {
+                let gamma0 = 2.0_f64.powf(alpha + beta + 1.0) / (alpha + beta + 1.0)
+                    * gamma(alpha + 1.0)
+                    * gamma(beta + 1.0)
+                    / gamma(alpha + beta + 1.0);
+                let p0 = 1.0 / gamma0.sqrt();
+                DVector::from_element(x.len(), p0)
+            }
+            1 => {
+                let gamma0 = 2.0_f64.powf(alpha + beta + 1.0) / (alpha + beta + 1.0)
+                    * gamma(alpha + 1.0)
+                    * gamma(beta + 1.0)
+                    / gamma(alpha + beta + 1.0);
+                let gamma1 = (alpha + 1.0) * (beta + 1.0) / (alpha + beta + 3.0) * gamma0;
+
+                let factor1 = (alpha + beta + 2.0) * 0.5;
+                let factor2 = (alpha - beta) * 0.5;
+                (x * factor1 + DVector::from_element(x.len(), factor2)) / gamma1.sqrt()
+            }
+            _ => {
+                // For n >= 2
+                let n_f = n as f64;
+
+                // Coefficient A_n
+                let an = Self::calculate_Ak(n_f, alpha, beta);
+
+                // Coefficient B_n
+                let h1_for_Bn = 2.0 * (n_f - 1.0) + alpha + beta;
+                let bn = -(alpha.powi(2) - beta.powi(2)) / h1_for_Bn / (h1_for_Bn + 2.0);
+
+                // Coefficient A_{n-1}
+                let a_n_minus_1 = Self::calculate_Ak(n_f - 1.0, alpha, beta);
+
+                let pn_1 = Self::jacobi_polynomial_nalgebra(x, alpha, beta, n - 1);
+                let pn_2 = Self::jacobi_polynomial_nalgebra(x, alpha, beta, n - 2);
+
+                // P_n = ( (x - B_n)P_{n-1} - A_{n-1}P_{n-2} ) / A_n
+                if an.abs() < 1e-16 {
+                    // Avoid division by zero or very small A_n
+                    panic!(
+                        "A_n is too small in jacobi_polynomial for n={}, alpha={}, beta={}",
+                        n, alpha, beta
+                    );
+                }
+                let x_minus_bn = x - DVector::from_element(x.len(), bn);
+                (x_minus_bn.component_mul(&pn_1) - &pn_2 * a_n_minus_1) / an
             }
         }
     }

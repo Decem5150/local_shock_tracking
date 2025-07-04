@@ -206,13 +206,17 @@ impl<'a> SpaceTimeSolver1DScalar for Disc1dAdvectionSpaceTimeTri<'a> {
         }
         res
     }
-    #[autodiff_reverse(dbnd_flux, Const, Active, Active, Active, Active, Active, Active)]
-    fn compute_boundary_flux(&self, u: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64 {
+    #[autodiff_reverse(
+        dbnd_flux, Const, Active, Const, Active, Active, Active, Active, Active
+    )]
+    fn compute_boundary_flux(&self, u: f64, ub: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64 {
         let advection_speed = self.advection_speed;
         let normal = Self::compute_normal(x0, y0, x1, y1);
         let beta = [advection_speed, 1.0];
         let beta_dot_normal = beta[0] * normal[0] + beta[1] * normal[1];
-        let result = beta_dot_normal * u;
+        let result = 0.5
+            * (beta_dot_normal * (u + ub)
+                + (beta_dot_normal * (100.0 * beta_dot_normal).tanh()) * (u - ub));
         result
     }
     #[autodiff_reverse(

@@ -1,3 +1,5 @@
+use crate::disc::boundary::scalar1d::{ConstantBoundary, PolynomialBoundary};
+
 use super::mesh1d::Node;
 use ndarray::ArrayView1;
 
@@ -123,10 +125,13 @@ pub struct Mesh2d<T: Element2d> {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     pub elements: Vec<T>,
-    pub flow_in_bnds: Vec<FlowInBoundary>,
-    pub flow_out_bnds: Vec<FlowOutBoundary>,
+    pub constant_bnds: Vec<ConstantBoundary>,
+    pub polynomial_bnds: Vec<PolynomialBoundary>,
     pub internal_edges: Vec<usize>,
     pub boundary_edges: Vec<usize>,
+    pub initial_edges: Vec<usize>,
+    pub side_edges: Vec<usize>,
+    pub final_edges: Vec<usize>,
     pub free_bnd_x: Vec<usize>,
     pub free_bnd_y: Vec<usize>,
     pub interior_nodes: Vec<usize>,
@@ -350,10 +355,13 @@ impl Mesh2d<QuadrilateralElement> {
             nodes,
             edges,
             elements,
-            flow_in_bnds: vec![],
-            flow_out_bnds: vec![],
+            constant_bnds: vec![],
+            polynomial_bnds: vec![],
             internal_edges,
             boundary_edges,
+            initial_edges: vec![],
+            side_edges: vec![],
+            final_edges: vec![],
             free_bnd_x,
             free_bnd_y,
             interior_nodes,
@@ -450,19 +458,20 @@ impl Mesh2d<TriangleElement> {
                 local_ids: vec![1, 2],
             },
         ];
-        let flow_in_bnds = vec![
-            FlowInBoundary {
+        let constant_bnds = vec![
+            ConstantBoundary {
                 iedges: vec![0, 5],
                 value: 2.0,
             },
-            FlowInBoundary {
+            ConstantBoundary {
                 iedges: vec![1],
                 value: 1.0,
             },
+            ConstantBoundary {
+                iedges: vec![2, 3, 4],
+                value: 0.0,
+            },
         ];
-        let flow_out_bnds = vec![FlowOutBoundary {
-            iedges: vec![2, 3, 4],
-        }];
         let internal_edges = vec![6, 7, 8];
         let boundary_edges = vec![0, 1, 2, 3, 4, 5];
         let elements: Vec<TriangleElement> = vec![
@@ -504,10 +513,13 @@ impl Mesh2d<TriangleElement> {
             nodes,
             edges,
             elements,
-            flow_in_bnds,
-            flow_out_bnds,
+            constant_bnds,
+            polynomial_bnds: vec![],
             internal_edges,
             boundary_edges,
+            initial_edges: vec![],
+            side_edges: vec![],
+            final_edges: vec![],
             free_bnd_x,
             free_bnd_y,
             interior_nodes,
@@ -660,22 +672,27 @@ impl Mesh2d<TriangleElement> {
             }, // 15
         ];
 
-        let flow_in_bnds = vec![
-            FlowInBoundary {
+        let constant_bnds = vec![
+            ConstantBoundary {
                 iedges: vec![0, 6, 9],
                 value: 1.0,
             },
-            FlowInBoundary {
+            ConstantBoundary {
                 iedges: vec![1],
                 value: 2.0,
             },
+            ConstantBoundary {
+                iedges: vec![4, 5, 8, 11],
+                value: 0.0,
+            },
         ];
-        let flow_out_bnds = vec![FlowOutBoundary {
-            iedges: vec![4, 5, 8, 11],
-        }];
 
         let boundary_edges = vec![0, 1, 4, 5, 6, 8, 9, 11];
         let internal_edges = vec![2, 3, 7, 10, 12, 13, 14, 15];
+
+        let initial_edges = vec![0, 1];
+        let side_edges = vec![6, 8, 9, 11];
+        let final_edges = vec![4, 5];
 
         let elements: Vec<TriangleElement> = vec![
             TriangleElement {
@@ -726,10 +743,13 @@ impl Mesh2d<TriangleElement> {
             nodes,
             edges,
             elements,
-            flow_in_bnds,
-            flow_out_bnds,
+            constant_bnds,
+            polynomial_bnds: vec![],
             internal_edges,
             boundary_edges,
+            initial_edges,
+            side_edges,
+            final_edges,
             free_bnd_x,
             free_bnd_y,
             interior_nodes,
@@ -919,10 +939,13 @@ impl Mesh2d<TriangleElement> {
             nodes,
             edges,
             elements,
-            flow_in_bnds,
-            flow_out_bnds,
+            constant_bnds: vec![],
+            polynomial_bnds: vec![],
             internal_edges,
             boundary_edges,
+            initial_edges: vec![],
+            side_edges: vec![],
+            final_edges: vec![],
             free_bnd_x,
             free_bnd_y,
             interior_nodes,
