@@ -5,6 +5,10 @@
 //     pub boundary_type: BoundaryType,
 //     pub boundary_quantity: Option<BoundaryQuantity1d>,
 // }
+pub enum Type {
+    Interior,
+    Boundary,
+}
 #[derive(Clone, Debug)]
 pub struct Node {
     pub x: f64,

@@ -6,33 +6,31 @@ mod solver;
 use disc::basis::triangle::TriangleBasis;
 use disc::mesh::mesh2d::Mesh2d;
 
-use initialization::initialize_two_element_mesh2d;
-use nshare::IntoNalgebra;
+use ndarray::Array2;
 
 use crate::disc::basis::lagrange1d::LobattoBasis;
 use crate::disc::basis::quadrilateral::QuadrilateralBasis;
 use crate::disc::burgers1d_space_time::Disc1dBurgers1dSpaceTime;
+use crate::disc::{SQP, SpaceTimeSolver1DScalar};
 use crate::initialization::initialize_mesh1d;
 use crate::solver::{ShockTrackingSolverTri, Solver};
-use disc::SpaceTimeSolver1DScalar;
 fn main() {
     let solver_params = initialization::initialize_params_by_file("inputs/solverparam.json");
-    // let basis = TriangleBasis::new(solver_params.polynomial_order);
-    // let enriched_basis = TriangleBasis::new(solver_params.polynomial_order + 1);
-    let space_basis = LobattoBasis::new(solver_params.polynomial_order);
-    let time_basis = LobattoBasis::new(solver_params.polynomial_order);
-    let space_time_basis = QuadrilateralBasis::new(solver_params.polynomial_order);
-    // let mut mesh = Mesh2d::create_eight_tri_mesh();
-    let mesh = initialize_mesh1d(40, -1.0, 1.0);
+    let basis = TriangleBasis::new(solver_params.polynomial_order);
+    let enriched_basis = TriangleBasis::new(solver_params.polynomial_order + 1);
+    // let space_basis = LobattoBasis::new(solver_params.polynomial_order);
+    // let time_basis = LobattoBasis::new(solver_params.polynomial_order);
+    // let space_time_basis = QuadrilateralBasis::new(solver_params.polynomial_order);
+
+    let mut mesh = Mesh2d::create_eight_tri_mesh();
+    let mut solutions = Array2::<f64>::zeros((mesh.elem_num, basis.r.len()));
+    let mut disc = Disc1dBurgers1dSpaceTime::new(basis, enriched_basis, &mut mesh, &solver_params);
+    disc.initialize_solution(solutions.view_mut());
+    disc.solve(solutions.view_mut());
+    // let mesh = initialize_mesh1d(40, -1.0, 1.0);
+
     // let mut solver =
     //    initialization::initialize_tri_solver(&mut mesh, basis, enriched_basis, &solver_params);
-    let mut solver = Solver::new(
-        space_basis,
-        time_basis,
-        space_time_basis,
-        &mesh,
-        &solver_params,
-    );
     /*
     // test compute initial condition value
     {

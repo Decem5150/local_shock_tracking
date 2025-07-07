@@ -26,16 +26,16 @@ use crate::disc::{
 };
 
 pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
-    fn compute_initial_guess(&self) -> Array2<f64> {
-        let mut solutions = Array2::zeros((self.mesh().elem_num, 1));
+    fn compute_initial_guess(&self, mesh: &Mesh2d<TriangleElement>) -> Array2<f64> {
+        let mut solutions = Array2::zeros((mesh.elem_num, 1));
         self.initialize_solution(solutions.view_mut());
-        let nelem = self.mesh().elem_num;
+        let nelem = mesh.elem_num;
         let mut residuals = Array2::<f64>::zeros((nelem, 1));
         let max_iter = 5000;
         let tol = 1e-12;
 
         for i in 0..max_iter {
-            self.compute_p0_residuals(solutions.view(), residuals.view_mut());
+            self.compute_p0_residuals(mesh, solutions.view(), residuals.view_mut());
 
             let res_norm = residuals.iter().map(|x| x.powi(2)).sum::<f64>().sqrt() / (nelem as f64);
 
@@ -53,9 +53,9 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
             let dts = self.compute_time_steps(solutions.view());
 
             for ielem in 0..nelem {
-                let elem = &self.mesh().elements[ielem];
-                let x: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[elem.inodes[i]].x);
-                let y: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[elem.inodes[i]].y);
+                let elem = &mesh.elements[ielem];
+                let x: [f64; 3] = std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].x);
+                let y: [f64; 3] = std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].y);
                 let area = Self::compute_element_area(&x, &y);
                 solutions[[ielem, 0]] -= dts[ielem] / area * residuals[[ielem, 0]];
             }
@@ -64,20 +64,25 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
         solutions
     }
 
-    fn compute_p0_residuals(&self, solutions: ArrayView2<f64>, mut residuals: ArrayViewMut2<f64>) {
+    fn compute_p0_residuals(
+        &self,
+        mesh: &Mesh2d<TriangleElement>,
+        solutions: ArrayView2<f64>,
+        mut residuals: ArrayViewMut2<f64>,
+    ) {
         residuals.fill(0.0);
 
         // Internal edges
-        for &iedge in &self.mesh().internal_edges {
-            let edge = &self.mesh().edges[iedge];
+        for &iedge in &mesh.interior_edges {
+            let edge = &mesh.edges[iedge];
             let ileft = edge.parents[0];
             let iright = edge.parents[1];
 
             let u_left = solutions[(ileft, 0)];
             let u_right = solutions[(iright, 0)];
 
-            let n0 = &self.mesh().nodes[edge.inodes[0]];
-            let n1 = &self.mesh().nodes[edge.inodes[1]];
+            let n0 = &mesh.nodes[edge.inodes[0]];
+            let n1 = &mesh.nodes[edge.inodes[1]];
 
             let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
 
@@ -91,14 +96,14 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
         }
 
         // Constant boundaries
-        for bnd in &self.mesh().constant_bnds {
+        for bnd in &mesh.constant_bnds {
             let ub = bnd.value;
             for &iedge in &bnd.iedges {
-                let edge = &self.mesh().edges[iedge];
+                let edge = &mesh.edges[iedge];
                 let ielem = edge.parents[0];
                 let u = solutions[(ielem, 0)];
-                let n0 = &self.mesh().nodes[edge.inodes[0]];
-                let n1 = &self.mesh().nodes[edge.inodes[1]];
+                let n0 = &mesh.nodes[edge.inodes[0]];
+                let n1 = &mesh.nodes[edge.inodes[1]];
                 let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
 
                 // For boundary edges, the node ordering is assumed to be counter-clockwise
@@ -109,32 +114,23 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
             }
         }
         // Polynomial boundaries
-        for bnd in &self.mesh().polynomial_bnds {
+        for bnd in &mesh.polynomial_bnds {
             let iedges = &bnd.iedges;
             let nodal_coeffs = &bnd.nodal_coeffs;
             for &iedge in iedges {
-                let edge = &self.mesh().edges[iedge];
+                let edge = &mesh.edges[iedge];
                 let ielem = edge.parents[0];
                 let u = solutions[(ielem, 0)];
-                let n0 = &self.mesh().nodes[edge.inodes[0]];
-                let n1 = &self.mesh().nodes[edge.inodes[1]];
+                let n0 = &mesh.nodes[edge.inodes[0]];
+                let n1 = &mesh.nodes[edge.inodes[1]];
                 let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
                 let (coord0, coord1) = match bnd.normal {
                     // Initial condition
-                    [0.0, -1.0] => (
-                        self.mesh().nodes[edge.inodes[0]].x,
-                        self.mesh().nodes[edge.inodes[1]].x,
-                    ),
+                    [0.0, -1.0] => (mesh.nodes[edge.inodes[0]].x, mesh.nodes[edge.inodes[1]].x),
                     // Right boundary
-                    [1.0, 0.0] => (
-                        self.mesh().nodes[edge.inodes[0]].y,
-                        self.mesh().nodes[edge.inodes[1]].y,
-                    ),
+                    [1.0, 0.0] => (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y),
                     // Left boundary
-                    [-1.0, 0.0] => (
-                        self.mesh().nodes[edge.inodes[0]].y,
-                        self.mesh().nodes[edge.inodes[1]].y,
-                    ),
+                    [-1.0, 0.0] => (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y),
                     _ => panic!("Invalid boundary normal"),
                 };
                 let xi = array![0.5];
@@ -161,9 +157,8 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
     fn interp_node_to_cubature(&self) -> &Array2<f64>;
     fn interp_node_to_enriched_cubature(&self) -> &Array2<f64>;
     fn interp_node_to_enriched_quadrature(&self) -> &Array2<f64>;
-    fn mesh(&self) -> &Mesh2d<TriangleElement>;
-    fn mesh_mut(&mut self) -> &mut Mesh2d<TriangleElement>;
-    fn initial_condition(&self) -> &Array1<f64>;
+    // fn mesh(&self) -> &Mesh2d<TriangleElement>;
+    // fn mesh_mut(&mut self) -> &mut Mesh2d<TriangleElement>;
 
     fn compute_interp_matrix_1d(
         n: usize,
@@ -223,7 +218,7 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                 residuals[(ielem, itest_func)] += res;
             }
         }
-        for &iedge in mesh.internal_edges.iter() {
+        for &iedge in mesh.interior_edges.iter() {
             let edge = &mesh.edges[iedge];
             let ilelem = edge.parents[0];
             let irelem = edge.parents[1];
@@ -481,6 +476,7 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
     }
     fn compute_residuals_and_derivatives(
         &self,
+        mesh: &mut Mesh2d<TriangleElement>,
         solutions: ArrayView2<f64>,
         mut residuals: ArrayViewMut2<f64>,
         mut dsol: ArrayViewMut2<f64>,
@@ -499,10 +495,10 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
         let ncell_basis = basis.r.len();
         let nedge_basis = basis.quad_p.len();
         let edge_weights = &basis.quad_w;
-        for (ielem, elem) in self.mesh().elements.iter().enumerate() {
+        for (ielem, elem) in mesh.elements.iter().enumerate() {
             let inodes = &elem.inodes;
-            let x_slice: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[inodes[i]].x);
-            let y_slice: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[inodes[i]].y);
+            let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
+            let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
             let interp_matrix = if is_enriched {
                 &self.interp_node_to_enriched_cubature()
             } else {
@@ -538,22 +534,18 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                 }
             }
         }
-        for &iedge in self.mesh().internal_edges.iter() {
-            let edge = &self.mesh().edges[iedge];
+        for &iedge in mesh.interior_edges.iter() {
+            let edge = &mesh.edges[iedge];
             let ilelem = edge.parents[0];
             let irelem = edge.parents[1];
-            let left_elem = &self.mesh().elements[ilelem];
-            let right_elem = &self.mesh().elements[irelem];
+            let left_elem = &mesh.elements[ilelem];
+            let right_elem = &mesh.elements[irelem];
             let left_inodes = &left_elem.inodes;
             let right_inodes = &right_elem.inodes;
-            let left_x_slice: [f64; 3] =
-                std::array::from_fn(|i| self.mesh().nodes[left_inodes[i]].x);
-            let left_y_slice: [f64; 3] =
-                std::array::from_fn(|i| self.mesh().nodes[left_inodes[i]].y);
-            let right_x_slice: [f64; 3] =
-                std::array::from_fn(|i| self.mesh().nodes[right_inodes[i]].x);
-            let right_y_slice: [f64; 3] =
-                std::array::from_fn(|i| self.mesh().nodes[right_inodes[i]].y);
+            let left_x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[left_inodes[i]].x);
+            let left_y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[left_inodes[i]].y);
+            let right_x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[right_inodes[i]].x);
+            let right_y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[right_inodes[i]].y);
             let common_edge = [edge.local_ids[0], edge.local_ids[1]];
             let sol_nodes_along_edges = &self.basis().nodes_along_edges;
             let nodes_along_edges = &basis.nodes_along_edges;
@@ -768,16 +760,16 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
             }
         }
         // Constant boundaries
-        for bnd in &self.mesh().constant_bnds {
+        for bnd in &mesh.constant_bnds {
             let iedges = &bnd.iedges;
             let bnd_value = bnd.value;
             for &iedge in iedges {
-                let edge = &self.mesh().edges[iedge];
+                let edge = &mesh.edges[iedge];
                 let ielem = edge.parents[0];
-                let elem = &self.mesh().elements[ielem];
+                let elem = &mesh.elements[ielem];
                 let inodes = &elem.inodes;
-                let x_slice: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[inodes[i]].x);
-                let y_slice: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[inodes[i]].y);
+                let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
+                let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
                 let sol_nodes_along_edges = &self.basis().nodes_along_edges;
                 let nodes_along_edges = &basis.nodes_along_edges;
                 let local_ids = &edge.local_ids;
@@ -892,16 +884,16 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
             }
         }
         // Polynomial boundaries
-        for bnd in &self.mesh().polynomial_bnds {
+        for bnd in &mesh.polynomial_bnds {
             let iedges = &bnd.iedges;
             let nodal_coeffs = &bnd.nodal_coeffs;
             for &iedge in iedges {
-                let edge = &self.mesh().edges[iedge];
+                let edge = &mesh.edges[iedge];
                 let ielem = edge.parents[0];
-                let elem = &self.mesh().elements[ielem];
+                let elem = &mesh.elements[ielem];
                 let inodes = &elem.inodes;
-                let x_slice: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[inodes[i]].x);
-                let y_slice: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[inodes[i]].y);
+                let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
+                let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
                 let sol_nodes_along_edges = &self.basis().nodes_along_edges;
                 let nodes_along_edges = &basis.nodes_along_edges;
                 let local_ids = &edge.local_ids;
@@ -937,20 +929,11 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                 );
                 let (coord0, coord1) = match bnd.normal {
                     // Initial condition
-                    [0.0, -1.0] => (
-                        self.mesh().nodes[edge.inodes[0]].x,
-                        self.mesh().nodes[edge.inodes[1]].x,
-                    ),
+                    [0.0, -1.0] => (mesh.nodes[edge.inodes[0]].x, mesh.nodes[edge.inodes[1]].x),
                     // Right boundary
-                    [1.0, 0.0] => (
-                        self.mesh().nodes[edge.inodes[0]].y,
-                        self.mesh().nodes[edge.inodes[1]].y,
-                    ),
+                    [1.0, 0.0] => (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y),
                     // Left boundary
-                    [-1.0, 0.0] => (
-                        self.mesh().nodes[edge.inodes[0]].y,
-                        self.mesh().nodes[edge.inodes[1]].y,
-                    ),
+                    [-1.0, 0.0] => (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y),
                     _ => panic!("Invalid boundary normal"),
                 };
                 let bnd_values = compute_boundary_value_by_interpolation(
@@ -1316,9 +1299,13 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
     ) -> f64;
     fn physical_flux(&self, u: f64) -> [f64; 2];
     fn initialize_solution(&self, solutions: ArrayViewMut2<f64>);
-    fn set_initial_solution(&self, initial_guess: ArrayView2<f64>) -> Array2<f64> {
+    fn set_initial_solution(
+        &self,
+        mesh: &Mesh2d<TriangleElement>,
+        initial_guess: ArrayView2<f64>,
+    ) -> Array2<f64> {
         let ncell_basis = self.basis().r.len();
-        let nelem = self.mesh().elem_num;
+        let nelem = mesh.elem_num;
         let mut solutions = Array2::zeros((nelem, ncell_basis));
 
         for ielem in 0..nelem {
@@ -1331,8 +1318,12 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
     }
 }
 pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
-    fn compute_node_constraints(&self, new_to_old: &Vec<usize>) -> Array2<f64> {
-        let n_nodes = self.mesh().node_num;
+    fn compute_node_constraints(
+        &self,
+        mesh: &Mesh2d<TriangleElement>,
+        new_to_old: &Vec<usize>,
+    ) -> Array2<f64> {
+        let n_nodes = mesh.node_num;
         let total_dofs = 2 * n_nodes;
 
         let n_free_dofs = new_to_old.len();
@@ -1358,10 +1349,10 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
         obj_dsol: ArrayView1<f64>,
         obj_dcoord: ArrayView1<f64>,
     ) -> (Array1<f64>, Array1<f64>) {
-        let nelem = self.mesh().elem_num;
+        let nelem = mesh.elem_num;
         let ncell_basis = self.basis().r.len();
-        let free_coords = &self.mesh().free_bnd_x.len() + &self.mesh().free_bnd_y.len();
-        let interior_nnodes = self.mesh().interior_nodes.len();
+        let free_coords = &mesh.free_bnd_x.len() + &mesh.free_bnd_y.len();
+        let interior_nnodes = mesh.interior_nodes.len();
         let num_u = nelem * ncell_basis;
         let num_x: usize = free_coords + 2 * interior_nnodes;
         let num_lambda = num_u;
@@ -1419,12 +1410,12 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
         let delta_x_ndarray = Array1::from_iter(delta_x.iter().copied());
         (delta_u_ndarray, delta_x_ndarray)
     }
-    fn solve(&mut self, mut solutions: ArrayViewMut2<f64>) {
-        let initial_guess = self.compute_initial_guess();
-        let initial_solutions = self.set_initial_solution(initial_guess.view());
+    fn solve(&mut self, mesh: &mut Mesh2d<TriangleElement>, mut solutions: ArrayViewMut2<f64>) {
+        let initial_guess = self.compute_initial_guess(mesh);
+        let initial_solutions = self.set_initial_solution(mesh, initial_guess.view());
         solutions.assign(&initial_solutions);
-        let nelem = self.mesh().elem_num;
-        let nnode = self.mesh().node_num;
+        let nelem = mesh.elem_num;
+        let nnode = mesh.node_num;
         let ncell_basis = self.basis().r.len();
         let enriched_ncell_basis = self.enriched_basis().r.len();
         let epsilon1 = 1e-10;
@@ -1433,8 +1424,8 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
         let max_sqp_iter = 30;
         // let free_coords = &self.mesh.free_coords;
         // println!("free_coords: {:?}", free_coords);
-        let (_old_to_new, new_to_old) = self.mesh().rearrange_node_dofs();
-        let node_constraints = self.compute_node_constraints(&new_to_old);
+        let (_old_to_new, new_to_old) = mesh.rearrange_node_dofs();
+        let node_constraints = self.compute_node_constraints(mesh, &new_to_old);
 
         let mut residuals: Array2<f64> = Array2::zeros((nelem, ncell_basis));
         let mut dsol: Array2<f64> = Array2::zeros((nelem * ncell_basis, nelem * ncell_basis));
@@ -1463,8 +1454,9 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
                 let row_str: Vec<String> = row.iter().map(|&val| format!("{:.4}", val)).collect();
                 println!("[{}]", row_str.join(", "));
             }
-            self.mesh().print_free_node_coords();
+            mesh.print_free_node_coords();
             self.compute_residuals_and_derivatives(
+                mesh,
                 solutions.view(),
                 residuals.view_mut(),
                 dsol.view_mut(),
@@ -1473,6 +1465,7 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
                 false,
             );
             self.compute_residuals_and_derivatives(
+                mesh,
                 solutions.view(),
                 enriched_residuals.view_mut(),
                 enriched_dsol.view_mut(),
@@ -1532,7 +1525,7 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
             );
             // backtracking line search
             let merit_func = |alpha: f64| -> f64 {
-                let mut tmp_mesh = self.mesh().clone();
+                let mut tmp_mesh = mesh.clone();
                 let delta_u_ndarray = Array::from_iter(delta_u.iter().copied());
                 let u_flat = &solutions.flatten() + alpha * &delta_u_ndarray;
                 let u = u_flat.to_shape((nelem, ncell_basis)).unwrap();

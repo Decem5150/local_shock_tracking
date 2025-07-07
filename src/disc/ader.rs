@@ -95,4 +95,40 @@ pub trait ADER1DShockTracking {
         let interp_matrix = v.dot(&inv_vandermonde);
         interp_matrix
     }
+    fn find_elements_in_which_nodes_lie(
+        elem_node_coords: &Array1<f64>,
+        sol_node_coords: &Array1<f64>,
+    ) -> Array1<f64> {
+        let mut element_indices = Array1::zeros(sol_node_coords.len());
+        let n_elements = elem_node_coords.len() - 1; // n nodes define n-1 elements
+
+        for (i, &sol_coord) in sol_node_coords.indexed_iter() {
+            // Find which element this sol_node belongs to
+            let mut found_element = 0.0;
+
+            // Linear search through elements to find the containing interval
+            for elem_idx in 0..n_elements {
+                let left_bound = elem_node_coords[elem_idx];
+                let right_bound = elem_node_coords[elem_idx + 1];
+
+                // Check if sol_coord is in this element's interval
+                if elem_idx == n_elements - 1 {
+                    // Last element: include right boundary [left, right]
+                    if sol_coord >= left_bound && sol_coord <= right_bound {
+                        found_element = elem_idx as f64;
+                        break;
+                    }
+                } else {
+                    // Other elements: exclude right boundary [left, right)
+                    if sol_coord >= left_bound && sol_coord < right_bound {
+                        found_element = elem_idx as f64;
+                        break;
+                    }
+                }
+            }
+            element_indices[i] = found_element;
+        }
+
+        element_indices
+    }
 }

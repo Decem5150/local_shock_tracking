@@ -12,22 +12,20 @@ use crate::{
 };
 
 pub struct Disc1dBurgers1dSpaceTime<'a> {
-    basis: TriangleBasis,
-    enriched_basis: TriangleBasis,
+    basis: &'a TriangleBasis,
+    enriched_basis: &'a TriangleBasis,
     interp_node_to_cubature: Array2<f64>,
     interp_node_to_enriched_cubature: Array2<f64>,
     interp_node_to_enriched_quadrature: Array2<f64>,
-    pub mesh: &'a mut Mesh2d<TriangleElement>,
+    // pub mesh: &'a mut Mesh2d<TriangleElement>,
     solver_param: &'a SolverParameters,
-    initial_condition: Array1<f64>,
 }
 impl<'a> Disc1dBurgers1dSpaceTime<'a> {
     pub fn new(
-        basis: TriangleBasis,
-        enriched_basis: TriangleBasis,
-        mesh: &'a mut Mesh2d<TriangleElement>,
+        basis: &'a TriangleBasis,
+        enriched_basis: &'a TriangleBasis,
+        // mesh: &'a mut Mesh2d<TriangleElement>,
         solver_param: &'a SolverParameters,
-        initial_condition: ArrayView1<f64>,
     ) -> Self {
         let interp_node_to_cubature = Self::compute_interp_matrix_2d(
             solver_param.polynomial_order,
@@ -54,16 +52,13 @@ impl<'a> Disc1dBurgers1dSpaceTime<'a> {
             inv_vandermonde_1d.view(),
             enriched_gauss_lobatto_points.view(),
         );
-        let initial_condition = initial_condition.to_owned();
         Self {
             basis,
             enriched_basis,
             interp_node_to_cubature,
             interp_node_to_enriched_cubature,
             interp_node_to_enriched_quadrature,
-            mesh,
             solver_param,
-            initial_condition,
         }
     }
 }
@@ -83,15 +78,14 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
     fn interp_node_to_enriched_quadrature(&self) -> &Array2<f64> {
         &self.interp_node_to_enriched_quadrature
     }
+    /*
     fn mesh(&self) -> &Mesh2d<TriangleElement> {
         self.mesh
     }
     fn mesh_mut(&mut self) -> &mut Mesh2d<TriangleElement> {
         self.mesh
     }
-    fn initial_condition(&self) -> &Array1<f64> {
-        &self.initial_condition
-    }
+    */
     #[autodiff_reverse(
         dvolume, Const, Const, Const, Duplicated, Duplicated, Duplicated, Active
     )]
@@ -193,11 +187,6 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
     }
     fn initialize_solution(&self, mut solutions: ArrayViewMut2<f64>) {
         /*
-        solutions.slice_mut(s![0, ..]).fill(4.0);
-        solutions.slice_mut(s![1, ..]).fill(4.0);
-        solutions.slice_mut(s![2, ..]).fill(0.0);
-        solutions.slice_mut(s![3, ..]).fill(0.0);
-        */
         solutions.slice_mut(s![0, ..]).fill(3.0);
         solutions.slice_mut(s![1, ..]).fill(3.0);
         solutions.slice_mut(s![2, ..]).fill(5.0);
@@ -207,6 +196,8 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
         solutions.slice_mut(s![5, ..]).fill(3.0);
         solutions.slice_mut(s![6, ..]).fill(5.0);
         solutions.slice_mut(s![7, ..]).fill(5.0);
+        */
+        solutions.fill(1.0);
     }
 }
 impl P0Solver for Disc1dBurgers1dSpaceTime<'_> {

@@ -127,9 +127,11 @@ pub struct Mesh2d<T: Element2d> {
     pub elements: Vec<T>,
     pub constant_bnds: Vec<ConstantBoundary>,
     pub polynomial_bnds: Vec<PolynomialBoundary>,
-    pub internal_edges: Vec<usize>,
+    pub lower_bnd: PolynomialBoundary,
+    pub right_bnd: PolynomialBoundary,
+    pub left_bnd: PolynomialBoundary,
+    pub interior_edges: Vec<usize>,
     pub boundary_edges: Vec<usize>,
-    pub initial_edges: Vec<usize>,
     pub side_edges: Vec<usize>,
     pub final_edges: Vec<usize>,
     pub free_bnd_x: Vec<usize>,
@@ -334,7 +336,7 @@ impl Mesh2d<QuadrilateralElement> {
                 local_ids: vec![1, 3],
             },
         ];
-        let internal_edges = vec![6];
+        let interior_edges = vec![6];
         let boundary_edges = vec![0, 1, 2, 3, 4, 5];
         let elements: Vec<QuadrilateralElement> = vec![
             QuadrilateralElement {
@@ -357,9 +359,8 @@ impl Mesh2d<QuadrilateralElement> {
             elements,
             constant_bnds: vec![],
             polynomial_bnds: vec![],
-            internal_edges,
+            interior_edges,
             boundary_edges,
-            initial_edges: vec![],
             side_edges: vec![],
             final_edges: vec![],
             free_bnd_x,
@@ -472,7 +473,7 @@ impl Mesh2d<TriangleElement> {
                 value: 0.0,
             },
         ];
-        let internal_edges = vec![6, 7, 8];
+        let interior_edges = vec![6, 7, 8];
         let boundary_edges = vec![0, 1, 2, 3, 4, 5];
         let elements: Vec<TriangleElement> = vec![
             TriangleElement {
@@ -515,9 +516,8 @@ impl Mesh2d<TriangleElement> {
             elements,
             constant_bnds,
             polynomial_bnds: vec![],
-            internal_edges,
+            interior_edges,
             boundary_edges,
-            initial_edges: vec![],
             side_edges: vec![],
             final_edges: vec![],
             free_bnd_x,
@@ -675,11 +675,11 @@ impl Mesh2d<TriangleElement> {
         let constant_bnds = vec![
             ConstantBoundary {
                 iedges: vec![0, 6, 9],
-                value: 1.0,
+                value: 2.0,
             },
             ConstantBoundary {
                 iedges: vec![1],
-                value: 2.0,
+                value: 1.0,
             },
             ConstantBoundary {
                 iedges: vec![4, 5, 8, 11],
@@ -688,7 +688,7 @@ impl Mesh2d<TriangleElement> {
         ];
 
         let boundary_edges = vec![0, 1, 4, 5, 6, 8, 9, 11];
-        let internal_edges = vec![2, 3, 7, 10, 12, 13, 14, 15];
+        let interior_edges = vec![2, 3, 7, 10, 12, 13, 14, 15];
 
         let initial_edges = vec![0, 1];
         let side_edges = vec![6, 8, 9, 11];
@@ -745,9 +745,8 @@ impl Mesh2d<TriangleElement> {
             elements,
             constant_bnds,
             polynomial_bnds: vec![],
-            internal_edges,
+            interior_edges,
             boundary_edges,
-            initial_edges,
             side_edges,
             final_edges,
             free_bnd_x,
@@ -850,7 +849,7 @@ impl Mesh2d<TriangleElement> {
         let boundary_edges: Vec<usize> = (0..edges.len())
             .filter(|&i| edges[i].parents.len() == 1)
             .collect();
-        let internal_edges: Vec<usize> = (0..edges.len())
+        let interior_edges: Vec<usize> = (0..edges.len())
             .filter(|&i| edges[i].parents.len() == 2)
             .collect();
 
@@ -941,9 +940,8 @@ impl Mesh2d<TriangleElement> {
             elements,
             constant_bnds: vec![],
             polynomial_bnds: vec![],
-            internal_edges,
+            interior_edges,
             boundary_edges,
-            initial_edges: vec![],
             side_edges: vec![],
             final_edges: vec![],
             free_bnd_x,

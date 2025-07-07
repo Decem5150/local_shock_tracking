@@ -8,14 +8,18 @@ use super::mesh::{
     mesh1d::Mesh1d,
     mesh2d::{Mesh2d, TriangleElement},
 };
-use crate::disc::basis::quadrilateral::QuadrilateralBasis;
-use crate::disc::geometric::Geometric1D;
+use crate::disc::ader::ADER1DShockTracking;
+use crate::disc::{SQP, SpaceTimeSolver1DScalar, geometric::Geometric1D};
 use crate::disc::{
     ader::{ADER1DMatrices, ADER1DScalar},
     basis::lagrange1d::LobattoBasis,
 };
+use crate::disc::{
+    basis::{quadrilateral::QuadrilateralBasis, triangle::TriangleBasis},
+    burgers1d_space_time::Disc1dBurgers1dSpaceTime,
+};
 use crate::solver::SolverParameters;
-use crate::{disc::ader::ADER1DShockTracking, solver::ShockTrackingSolverTri};
+use hashbrown::HashMap;
 use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, ArrayViewMut3, Axis, s};
 use ndarray_linalg::Inverse;
 use riemann_solver::rusanov::rusanov;
@@ -101,8 +105,12 @@ impl<'a> Disc1dBurgers<'a> {
         let nedge_basis = self.space_time_basis.quad_p.len();
         let edge_weights = &self.space_time_basis.quad_w;
         let mut residuals: Array3<f64> = Array3::zeros((nelem, space_ndof, 1));
-        let mut old_solutions: Array3<f64> = solutions.to_owned();
         let mut lqh = Array3::zeros((nelem, space_time_ndof, 1));
+
+        let shock_tracking_basis = TriangleBasis::new(self.solver_param.polynomial_order);
+        let shock_tracking_enriched_basis =
+            TriangleBasis::new(self.solver_param.polynomial_order + 1);
+
         /*
         write_to_csv(
             solutions.view(),
@@ -119,89 +127,142 @@ impl<'a> Disc1dBurgers<'a> {
             println!("current_step: {}", self.current_step);
             println!("current_time: {}", self.current_time);
             println!("solutions: {:?}", solutions);
+            let mut sub_solutions = Vec::<Array2<f64>>::new();
+            let mut sub_meshes = Vec::<Mesh2d<TriangleElement>>::new();
+            let mut is_troubled = Array1::from_elem(nelem, false);
+            is_troubled[8] = true;
+            let troubled_elems = vec![8];
             residuals.fill(0.0);
-            old_solutions.assign(&solutions);
             let mut dt = self.compute_time_step(solutions.view());
             // let mut dt = 0.002;
             if self.current_time + dt > self.solver_param.final_time {
                 dt = self.solver_param.final_time - self.current_time;
             }
+
+            let mut map_elem_to_troubled_index = HashMap::<usize, usize>::new();
+            let mut troubled_count = 0;
+
             for (ielem, elem) in self.mesh.elements.iter().enumerate() {
-                let inodes = &elem.inodes;
-                let x_slice: [f64; 2] = std::array::from_fn(|i| self.mesh.nodes[inodes[i]].x);
-                let sol_slice = solutions.slice(s![ielem, .., ..]);
-                lqh.slice_mut(s![ielem, .., ..])
-                    .assign(&self.local_space_time_predictor(sol_slice, x_slice, dt));
-            }
-            /*
-            write_to_csv(
-                lqh.view().slice(s![.., cell_ngp - 1, .., ..]),
-                self.mesh,
-                &self.basis,
-                &format!("outputs/lqh_{}.csv", self.current_step),
-            )
-            .unwrap();
-            */
-            for (ielem, elem) in self.mesh.elements.iter().enumerate() {
-                let inodes = &elem.inodes;
-                let x_slice: [f64; 2] = std::array::from_fn(|i| self.mesh.nodes[inodes[i]].x);
-                let lqh_slice = lqh.slice(s![ielem, .., ..]);
-                for itest_func in 0..space_ndof {
-                    let res = self.volume_integral(itest_func, lqh_slice, x_slice, dt);
-                    residuals[[ielem, itest_func, 0]] -= res;
+                match is_troubled[ielem] {
+                    false => {
+                        let inodes = &elem.inodes;
+                        let x_slice: [f64; 2] =
+                            std::array::from_fn(|i| self.mesh.nodes[inodes[i]].x);
+                        let sol_slice = solutions.slice(s![ielem, .., ..]);
+                        lqh.slice_mut(s![ielem, .., ..])
+                            .assign(&self.local_space_time_predictor(sol_slice, x_slice, dt));
+                    }
+                    true => {
+                        let mut submesh = Mesh2d::create_tri_mesh(9);
+                        let mut local_solutions =
+                            Array2::<f64>::zeros((submesh.elem_num, shock_tracking_basis.r.len()));
+                        let mut shock_tracker = Disc1dBurgers1dSpaceTime::new(
+                            &shock_tracking_basis,
+                            &shock_tracking_enriched_basis,
+                            self.solver_param,
+                        );
+                        shock_tracker.initialize_solution(local_solutions.view_mut());
+                        shock_tracker.solve(&mut submesh, local_solutions.view_mut());
+                        sub_solutions.push(local_solutions);
+                        sub_meshes.push(submesh);
+
+                        map_elem_to_troubled_index.insert(ielem, troubled_count);
+                        troubled_count += 1;
+                    }
                 }
             }
-            /*
-            write_to_csv(
-                residuals.view(),
-                self.mesh,
-                &self.basis,
-                &format!("outputs/residuals_{}.csv", self.current_step),
-            )
-            .unwrap();
-            */
+            for (ielem, elem) in self.mesh.elements.iter().enumerate() {
+                match is_troubled[ielem] {
+                    false => {
+                        let inodes = &elem.inodes;
+                        let x_slice: [f64; 2] =
+                            std::array::from_fn(|i| self.mesh.nodes[inodes[i]].x);
+                        let lqh_slice = lqh.slice(s![ielem, .., ..]);
+                        for itest_func in 0..space_ndof {
+                            let res = self.volume_integral(itest_func, lqh_slice, x_slice, dt);
+                            residuals[[ielem, itest_func, 0]] -= res;
+                        }
+                    }
+                    true => {}
+                }
+            }
             for &inode in self.mesh.internal_nodes.iter() {
                 let node = &self.mesh.nodes[inode];
                 let ilelem = node.parents[0];
                 let irelem = node.parents[1];
-                let left_inodes = &self.mesh.elements[ilelem].inodes;
-                let right_inodes = &self.mesh.elements[irelem].inodes;
-                let left_x_slice: [f64; 2] =
-                    std::array::from_fn(|i| self.mesh.nodes[left_inodes[i]].x);
-                let right_x_slice: [f64; 2] =
-                    std::array::from_fn(|i| self.mesh.nodes[right_inodes[i]].x);
-                let left_jacob_det = Self::compute_interval_length(&left_x_slice);
-                let right_jacob_det = Self::compute_interval_length(&right_x_slice);
-                let nodes_along_edges = &self.space_time_basis.nodes_along_edges;
-                let local_ids: [usize; 2] = [1, 3];
-                let left_lqh_slice = lqh.slice(s![ilelem, .., ..]).select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                let right_lqh_slice = lqh.slice(s![irelem, .., ..]).select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[1], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                for i in 0..nedge_basis {
-                    let left_value = left_lqh_slice[(i, 0)];
-                    let right_value = right_lqh_slice[(nedge_basis - 1 - i, 0)];
-                    let num_flux = rusanov(left_value, right_value);
-                    let left_scaling = dt / left_jacob_det;
-                    let right_scaling = dt / right_jacob_det;
-                    let left_transformed_flux = num_flux * left_scaling;
-                    let right_transformed_flux = -num_flux * right_scaling;
-                    let left_itest_func = self.space_basis.xi.len() - 1;
-                    let right_itest_func = 0;
-                    residuals[[ilelem, left_itest_func, 0]] -=
-                        edge_weights[i] * left_transformed_flux;
-                    residuals[[irelem, right_itest_func, 0]] -=
-                        edge_weights[i] * right_transformed_flux;
+                match (is_troubled[ilelem], is_troubled[irelem]) {
+                    (false, false) => {
+                        let left_inodes = &self.mesh.elements[ilelem].inodes;
+                        let right_inodes = &self.mesh.elements[irelem].inodes;
+                        let left_x_slice: [f64; 2] =
+                            std::array::from_fn(|i| self.mesh.nodes[left_inodes[i]].x);
+                        let right_x_slice: [f64; 2] =
+                            std::array::from_fn(|i| self.mesh.nodes[right_inodes[i]].x);
+                        let left_jacob_det = Self::compute_interval_length(&left_x_slice);
+                        let right_jacob_det = Self::compute_interval_length(&right_x_slice);
+                        let nodes_along_edges = &self.space_time_basis.nodes_along_edges;
+                        let local_ids: [usize; 2] = [1, 3];
+                        let left_lqh_slice = lqh.slice(s![ilelem, .., ..]).select(
+                            Axis(0),
+                            nodes_along_edges
+                                .slice(s![local_ids[0], ..])
+                                .as_slice()
+                                .unwrap(),
+                        );
+                        let right_lqh_slice = lqh.slice(s![irelem, .., ..]).select(
+                            Axis(0),
+                            nodes_along_edges
+                                .slice(s![local_ids[1], ..])
+                                .as_slice()
+                                .unwrap(),
+                        );
+                        for i in 0..nedge_basis {
+                            let left_value = left_lqh_slice[(i, 0)];
+                            let right_value = right_lqh_slice[(nedge_basis - 1 - i, 0)];
+                            let num_flux = rusanov(left_value, right_value);
+                            let left_scaling = dt / left_jacob_det;
+                            let right_scaling = dt / right_jacob_det;
+                            let left_transformed_flux = num_flux * left_scaling;
+                            let right_transformed_flux = -num_flux * right_scaling;
+                            let left_itest_func = self.space_basis.xi.len() - 1;
+                            let right_itest_func = 0;
+                            residuals[[ilelem, left_itest_func, 0]] -=
+                                edge_weights[i] * left_transformed_flux;
+                            residuals[[irelem, right_itest_func, 0]] -=
+                                edge_weights[i] * right_transformed_flux;
+                        }
+                    }
+                    (false, true) => {
+                        let left_inodes = &self.mesh.elements[ilelem].inodes;
+                        let left_x_slice: [f64; 2] =
+                            std::array::from_fn(|i| self.mesh.nodes[left_inodes[i]].x);
+                        let left_jacob_det = Self::compute_interval_length(&left_x_slice);
+                        let nodes_along_edges = &self.space_time_basis.nodes_along_edges;
+                        let local_ids: [usize; 2] = [1, 3];
+                        let left_lqh_slice = lqh.slice(s![ilelem, .., ..]).select(
+                            Axis(0),
+                            nodes_along_edges
+                                .slice(s![local_ids[0], ..])
+                                .as_slice()
+                                .unwrap(),
+                        );
+                        let etas = self.time_basis.xi.clone();
+
+                        let submesh = &sub_meshes[map_elem_to_troubled_index[&irelem]];
+                        let elem_node_coords = Array1::from_iter(
+                            submesh
+                                .left_bnd
+                                .inodes
+                                .iter()
+                                .map(|&node| submesh.nodes[node].y),
+                        );
+                    }
+                    (true, false) => {
+                        todo!()
+                    }
+                    (true, true) => {
+                        todo!()
+                    }
                 }
             }
             // apply bc
