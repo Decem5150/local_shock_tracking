@@ -21,6 +21,7 @@ use ndarray_stats::QuantileExt;
 
 use crate::disc::{
     basis::{Basis, lagrange1d::LobattoBasis, triangle::TriangleBasis},
+    boundary::scalar1d::PolynomialBoundary,
     geometric::Geometric2D,
     mesh::mesh2d::{Mesh2d, TriangleElement},
 };
@@ -50,7 +51,7 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
                 return solutions;
             }
 
-            let dts = self.compute_time_steps(solutions.view());
+            let dts = self.compute_time_steps(mesh, solutions.view());
 
             for ielem in 0..nelem {
                 let elem = &mesh.elements[ielem];
@@ -148,7 +149,11 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
             }
         }
     }
-    fn compute_time_steps(&self, _solutions: ArrayView2<f64>) -> Array1<f64>;
+    fn compute_time_steps(
+        &self,
+        mesh: &Mesh2d<TriangleElement>,
+        solutions: ArrayView2<f64>,
+    ) -> Array1<f64>;
 }
 
 pub trait SpaceTimeSolver1DScalar: Geometric2D {
@@ -1316,6 +1321,32 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
         }
         solutions
     }
+    fn get_solutions_along_boundary(
+        &self,
+        mesh: &Mesh2d<TriangleElement>,
+        iedges: &Vec<usize>,
+        solutions: &Array2<f64>,
+    ) -> Array2<f64> {
+        let sol_nodes_along_edges = &self.basis().nodes_along_edges;
+        let n_bnd_edges = iedges.len();
+        let nedge_basis = sol_nodes_along_edges.shape()[1];
+
+        let mut bnd_solutions = Array2::zeros((n_bnd_edges, nedge_basis));
+
+        for (i, &iedge) in iedges.iter().enumerate() {
+            let edge = &mesh.edges[iedge];
+            let ielem = edge.parents[0];
+            let local_edge_id = edge.local_ids[0];
+            let element_sols = solutions.slice(s![ielem, ..]);
+            let dof_indices_on_edge = sol_nodes_along_edges.slice(s![local_edge_id, ..]);
+
+            let sols_on_edge =
+                element_sols.select(Axis(0), dof_indices_on_edge.as_slice().unwrap());
+
+            bnd_solutions.row_mut(i).assign(&sols_on_edge);
+        }
+        bnd_solutions
+    }
 }
 pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
     fn compute_node_constraints(
@@ -1339,6 +1370,7 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
     #[allow(non_snake_case)]
     fn solve_linear_subproblem(
         &self,
+        mesh: &Mesh2d<TriangleElement>,
         node_constraints: ArrayView2<f64>,
         res: ArrayView2<f64>,
         hessian_uu: ArrayView2<f64>,
@@ -1513,6 +1545,7 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
             hessian_xx += &(1e-5 * &Array2::eye(hessian_xx.shape()[0]));
 
             let (delta_u, delta_x) = self.solve_linear_subproblem(
+                mesh,
                 node_constraints.view(),
                 residuals.view(),
                 hessian_uu.view(),
@@ -1563,8 +1596,7 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
                 );
             }
             solutions.scaled_add(alpha, &delta_u.to_shape(solutions.shape()).unwrap());
-            self.mesh_mut()
-                .update_node_coords(&new_to_old, alpha, delta_x.view());
+            mesh.update_node_coords(&new_to_old, alpha, delta_x.view());
             iter += 1;
         }
         /*

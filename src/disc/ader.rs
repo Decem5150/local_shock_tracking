@@ -87,24 +87,24 @@ pub trait ADER1DShockTracking {
     }
     fn compute_interp_matrix(
         n: usize,
-        inv_vandermonde: ArrayView2<f64>,
-        r: ArrayView1<f64>,
+        inv_vandermonde: &Array2<f64>,
+        r: &Array1<f64>,
     ) -> Array2<f64> {
-        let r_map = r.mapv(|v| 2.0 * v - 1.0);
+        let r_map = r.mapv(|v| 2.0 * v - 1.0); // map back to [-1, 1]
         let v = LobattoBasis::vandermonde1d(n, r_map.view());
-        let interp_matrix = v.dot(&inv_vandermonde);
+        let interp_matrix = v.dot(inv_vandermonde);
         interp_matrix
     }
     fn find_elements_in_which_nodes_lie(
         elem_node_coords: &Array1<f64>,
         sol_node_coords: &Array1<f64>,
-    ) -> Array1<f64> {
+    ) -> Array1<usize> {
         let mut element_indices = Array1::zeros(sol_node_coords.len());
         let n_elements = elem_node_coords.len() - 1; // n nodes define n-1 elements
 
         for (i, &sol_coord) in sol_node_coords.indexed_iter() {
             // Find which element this sol_node belongs to
-            let mut found_element = 0.0;
+            let mut found_element = 0;
 
             // Linear search through elements to find the containing interval
             for elem_idx in 0..n_elements {
@@ -115,13 +115,13 @@ pub trait ADER1DShockTracking {
                 if elem_idx == n_elements - 1 {
                     // Last element: include right boundary [left, right]
                     if sol_coord >= left_bound && sol_coord <= right_bound {
-                        found_element = elem_idx as f64;
+                        found_element = elem_idx;
                         break;
                     }
                 } else {
                     // Other elements: exclude right boundary [left, right)
                     if sol_coord >= left_bound && sol_coord < right_bound {
-                        found_element = elem_idx as f64;
+                        found_element = elem_idx;
                         break;
                     }
                 }
@@ -130,5 +130,28 @@ pub trait ADER1DShockTracking {
         }
 
         element_indices
+    }
+    fn compute_local_coords_in_subelements(
+        elements_in_which_nodes_lie: &Array1<usize>,
+        elem_node_coords: &Array1<f64>,
+        sol_node_coords: &Array1<f64>,
+    ) -> Array1<f64> {
+        let mut local_coords = Array1::zeros(sol_node_coords.len());
+        ndarray::azip!((
+            local_coord in &mut local_coords,
+            &sol_coord in sol_node_coords,
+            &elem_idx in elements_in_which_nodes_lie
+        ) {
+            let x_left = elem_node_coords[elem_idx];
+            let x_right = elem_node_coords[elem_idx + 1];
+            let dx = x_right - x_left;
+
+            if dx.abs() > 1e-12 {
+                *local_coord = (sol_coord - x_left) / dx;
+            } else {
+                *local_coord = 0.0;
+            }
+        });
+        local_coords
     }
 }

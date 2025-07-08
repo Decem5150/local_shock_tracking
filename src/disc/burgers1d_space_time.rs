@@ -12,18 +12,18 @@ use crate::{
 };
 
 pub struct Disc1dBurgers1dSpaceTime<'a> {
-    basis: &'a TriangleBasis,
-    enriched_basis: &'a TriangleBasis,
-    interp_node_to_cubature: Array2<f64>,
-    interp_node_to_enriched_cubature: Array2<f64>,
-    interp_node_to_enriched_quadrature: Array2<f64>,
+    pub basis: TriangleBasis,
+    pub enriched_basis: TriangleBasis,
+    pub interp_node_to_cubature: Array2<f64>,
+    pub interp_node_to_enriched_cubature: Array2<f64>,
+    pub interp_node_to_enriched_quadrature: Array2<f64>,
     // pub mesh: &'a mut Mesh2d<TriangleElement>,
-    solver_param: &'a SolverParameters,
+    pub solver_param: &'a SolverParameters,
 }
 impl<'a> Disc1dBurgers1dSpaceTime<'a> {
     pub fn new(
-        basis: &'a TriangleBasis,
-        enriched_basis: &'a TriangleBasis,
+        basis: TriangleBasis,
+        enriched_basis: TriangleBasis,
         // mesh: &'a mut Mesh2d<TriangleElement>,
         solver_param: &'a SolverParameters,
     ) -> Self {
@@ -201,7 +201,11 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
     }
 }
 impl P0Solver for Disc1dBurgers1dSpaceTime<'_> {
-    fn compute_time_steps(&self, solutions: ArrayView2<f64>) -> Array1<f64> {
+    fn compute_time_steps(
+        &self,
+        mesh: &Mesh2d<TriangleElement>,
+        solutions: ArrayView2<f64>,
+    ) -> Array1<f64> {
         let nelem = self.mesh.elem_num;
         let mut dts = Array1::zeros(nelem);
         let cfl = 0.5;
@@ -217,9 +221,9 @@ impl P0Solver for Disc1dBurgers1dSpaceTime<'_> {
 
             let mut min_len_sq = std::f64::MAX;
             for &iedge in &elem.iedges {
-                let edge = &self.mesh().edges[iedge];
-                let n0 = &self.mesh().nodes[edge.inodes[0]];
-                let n1 = &self.mesh().nodes[edge.inodes[1]];
+                let edge = mesh.edges[iedge];
+                let n0 = mesh.nodes[edge.inodes[0]];
+                let n1 = mesh.nodes[edge.inodes[1]];
                 let len_sq = (n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2);
                 if len_sq < min_len_sq {
                     min_len_sq = len_sq;

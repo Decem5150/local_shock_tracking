@@ -20,7 +20,10 @@ use crate::disc::{
 };
 use crate::solver::SolverParameters;
 use hashbrown::HashMap;
-use ndarray::{Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, ArrayViewMut3, Axis, s};
+use ndarray::{
+    Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, ArrayViewMut2, ArrayViewMut3, Axis,
+    s,
+};
 use ndarray_linalg::Inverse;
 use riemann_solver::rusanov::rusanov;
 
@@ -37,6 +40,7 @@ pub struct Disc1dBurgers<'a> {
     kxi_mat: Array2<f64>,
     ik1_mat: Array2<f64>,
     f0_mat: Array2<f64>,
+    shock_tracker: Disc1dBurgers1dSpaceTime<'a>,
 }
 impl<'a> Disc1dBurgers<'a> {
     pub fn new(
@@ -54,13 +58,21 @@ impl<'a> Disc1dBurgers<'a> {
         let ik1_mat = Self::compute_ik1_mat(&space_basis, &time_basis);
         let f0_mat = Self::compute_f0_mat(&space_basis);
 
-        println!("space_m_mat: {:?}", space_m_mat);
-        println!("space_im_mat: {:?}", space_im_mat);
-        println!("space_time_m_mat: {:?}", space_time_m_mat);
-        println!("space_time_im_mat: {:?}", space_time_im_mat);
-        println!("kxi_mat: {:?}", kxi_mat);
-        println!("ik1_mat: {:?}", ik1_mat);
-        println!("f0_mat: {:?}", f0_mat);
+        // println!("space_m_mat: {:?}", space_m_mat);
+        // println!("space_im_mat: {:?}", space_im_mat);
+        // println!("space_time_m_mat: {:?}", space_time_m_mat);
+        // println!("space_time_im_mat: {:?}", space_time_im_mat);
+        // println!("kxi_mat: {:?}", kxi_mat);
+        // println!("ik1_mat: {:?}", ik1_mat);
+        // println!("f0_mat: {:?}", f0_mat);
+
+        let shock_tracking_basis = TriangleBasis::new(solver_param.polynomial_order);
+        let shock_tracking_enriched_basis = TriangleBasis::new(solver_param.polynomial_order + 1);
+        let shock_tracker = Disc1dBurgers1dSpaceTime::new(
+            shock_tracking_basis,
+            shock_tracking_enriched_basis,
+            solver_param,
+        );
         let disc = Disc1dBurgers {
             current_time: 0.0,
             current_step: 0,
@@ -74,6 +86,7 @@ impl<'a> Disc1dBurgers<'a> {
             kxi_mat,
             ik1_mat,
             f0_mat,
+            shock_tracker,
         };
         /*
         let (space_m_mat_ref, space_time_m_mat_ref) = disc.compute_m_mat_ref();
@@ -98,29 +111,15 @@ impl<'a> Disc1dBurgers<'a> {
         */
         disc
     }
-    pub fn solve(&mut self, mut solutions: ArrayViewMut3<f64>) {
+    pub fn solve(&mut self, mut solutions: ArrayViewMut2<f64>) {
         let nelem = self.mesh.elem_num;
         let space_time_ndof = self.space_time_basis.xi.len();
         let space_ndof = self.space_basis.xi.len();
         let nedge_basis = self.space_time_basis.quad_p.len();
         let edge_weights = &self.space_time_basis.quad_w;
-        let mut residuals: Array3<f64> = Array3::zeros((nelem, space_ndof, 1));
-        let mut lqh = Array3::zeros((nelem, space_time_ndof, 1));
+        let mut residuals = Array2::zeros((nelem, space_ndof));
+        let mut lqh = Array2::zeros((nelem, space_time_ndof));
 
-        let shock_tracking_basis = TriangleBasis::new(self.solver_param.polynomial_order);
-        let shock_tracking_enriched_basis =
-            TriangleBasis::new(self.solver_param.polynomial_order + 1);
-
-        /*
-        write_to_csv(
-            solutions.view(),
-            self.mesh,
-            &self.basis,
-            self.current_time,
-            &format!("outputs/solutions_{}.csv", self.current_step),
-        )
-        .unwrap();
-        */
         while self.current_step < self.solver_param.final_step
             && self.current_time < self.solver_param.final_time
         {
@@ -148,21 +147,20 @@ impl<'a> Disc1dBurgers<'a> {
                         let inodes = &elem.inodes;
                         let x_slice: [f64; 2] =
                             std::array::from_fn(|i| self.mesh.nodes[inodes[i]].x);
-                        let sol_slice = solutions.slice(s![ielem, .., ..]);
-                        lqh.slice_mut(s![ielem, .., ..])
+                        let sol_slice = solutions.slice(s![ielem, ..]);
+                        lqh.slice_mut(s![ielem, ..])
                             .assign(&self.local_space_time_predictor(sol_slice, x_slice, dt));
                     }
                     true => {
                         let mut submesh = Mesh2d::create_tri_mesh(9);
-                        let mut local_solutions =
-                            Array2::<f64>::zeros((submesh.elem_num, shock_tracking_basis.r.len()));
-                        let mut shock_tracker = Disc1dBurgers1dSpaceTime::new(
-                            &shock_tracking_basis,
-                            &shock_tracking_enriched_basis,
-                            self.solver_param,
-                        );
-                        shock_tracker.initialize_solution(local_solutions.view_mut());
-                        shock_tracker.solve(&mut submesh, local_solutions.view_mut());
+                        let mut local_solutions = Array2::<f64>::zeros((
+                            submesh.elem_num,
+                            self.shock_tracker.basis.r.len(),
+                        ));
+                        self.shock_tracker
+                            .initialize_solution(local_solutions.view_mut());
+                        self.shock_tracker
+                            .solve(&mut submesh, local_solutions.view_mut());
                         sub_solutions.push(local_solutions);
                         sub_meshes.push(submesh);
 
@@ -177,10 +175,10 @@ impl<'a> Disc1dBurgers<'a> {
                         let inodes = &elem.inodes;
                         let x_slice: [f64; 2] =
                             std::array::from_fn(|i| self.mesh.nodes[inodes[i]].x);
-                        let lqh_slice = lqh.slice(s![ielem, .., ..]);
+                        let lqh_slice = lqh.slice(s![ielem, ..]);
                         for itest_func in 0..space_ndof {
                             let res = self.volume_integral(itest_func, lqh_slice, x_slice, dt);
-                            residuals[[ielem, itest_func, 0]] -= res;
+                            residuals[[ielem, itest_func]] -= res;
                         }
                     }
                     true => {}
@@ -202,14 +200,14 @@ impl<'a> Disc1dBurgers<'a> {
                         let right_jacob_det = Self::compute_interval_length(&right_x_slice);
                         let nodes_along_edges = &self.space_time_basis.nodes_along_edges;
                         let local_ids: [usize; 2] = [1, 3];
-                        let left_lqh_slice = lqh.slice(s![ilelem, .., ..]).select(
+                        let left_lqh_slice = lqh.slice(s![ilelem, ..]).select(
                             Axis(0),
                             nodes_along_edges
                                 .slice(s![local_ids[0], ..])
                                 .as_slice()
                                 .unwrap(),
                         );
-                        let right_lqh_slice = lqh.slice(s![irelem, .., ..]).select(
+                        let right_lqh_slice = lqh.slice(s![irelem, ..]).select(
                             Axis(0),
                             nodes_along_edges
                                 .slice(s![local_ids[1], ..])
@@ -217,8 +215,8 @@ impl<'a> Disc1dBurgers<'a> {
                                 .unwrap(),
                         );
                         for i in 0..nedge_basis {
-                            let left_value = left_lqh_slice[(i, 0)];
-                            let right_value = right_lqh_slice[(nedge_basis - 1 - i, 0)];
+                            let left_value = left_lqh_slice[i];
+                            let right_value = right_lqh_slice[nedge_basis - 1 - i];
                             let num_flux = rusanov(left_value, right_value);
                             let left_scaling = dt / left_jacob_det;
                             let right_scaling = dt / right_jacob_det;
@@ -226,29 +224,38 @@ impl<'a> Disc1dBurgers<'a> {
                             let right_transformed_flux = -num_flux * right_scaling;
                             let left_itest_func = self.space_basis.xi.len() - 1;
                             let right_itest_func = 0;
-                            residuals[[ilelem, left_itest_func, 0]] -=
+                            residuals[(ilelem, left_itest_func)] -=
                                 edge_weights[i] * left_transformed_flux;
-                            residuals[[irelem, right_itest_func, 0]] -=
+                            residuals[(irelem, right_itest_func)] -=
                                 edge_weights[i] * right_transformed_flux;
                         }
                     }
                     (false, true) => {
+                        let troubled_index = map_elem_to_troubled_index[&irelem];
+                        let submesh = &mut sub_meshes[troubled_index];
+                        let local_sols = &sub_solutions[troubled_index];
+
                         let left_inodes = &self.mesh.elements[ilelem].inodes;
                         let left_x_slice: [f64; 2] =
                             std::array::from_fn(|i| self.mesh.nodes[left_inodes[i]].x);
                         let left_jacob_det = Self::compute_interval_length(&left_x_slice);
                         let nodes_along_edges = &self.space_time_basis.nodes_along_edges;
                         let local_ids: [usize; 2] = [1, 3];
-                        let left_lqh_slice = lqh.slice(s![ilelem, .., ..]).select(
+                        let left_lqh_slice = lqh.slice(s![ilelem, ..]).select(
                             Axis(0),
                             nodes_along_edges
                                 .slice(s![local_ids[0], ..])
                                 .as_slice()
                                 .unwrap(),
                         );
-                        let etas = self.time_basis.xi.clone();
 
-                        let submesh = &sub_meshes[map_elem_to_troubled_index[&irelem]];
+                        let right_sols_along_boundary =
+                            self.shock_tracker.get_solutions_along_boundary(
+                                submesh,
+                                &submesh.left_bnd.iedges,
+                                local_sols,
+                            );
+                        let etas = &self.time_basis.xi; // quadrature points in time direction
                         let elem_node_coords = Array1::from_iter(
                             submesh
                                 .left_bnd
@@ -256,9 +263,110 @@ impl<'a> Disc1dBurgers<'a> {
                                 .iter()
                                 .map(|&node| submesh.nodes[node].y),
                         );
+                        let elements_in_which_nodes_lie =
+                            Self::find_elements_in_which_nodes_lie(&elem_node_coords, &etas);
+                        let local_coords = Self::compute_local_coords_in_subelements(
+                            &elements_in_which_nodes_lie,
+                            &elem_node_coords,
+                            &etas,
+                        );
+
+                        let mut right_sols = Array1::<f64>::zeros(local_coords.len());
+                        for (i, &local_coord) in local_coords.indexed_iter() {
+                            let local_coord_array = Array1::from_elem(1, local_coord);
+                            let interp_matrix = Self::compute_interp_matrix(
+                                self.solver_param.polynomial_order,
+                                &self.shock_tracker.basis.inv_vandermonde,
+                                &local_coord_array,
+                            );
+                            right_sols[i] =
+                                interp_matrix.dot(&right_sols_along_boundary.slice(s![i, ..]))[0];
+                        }
+
+                        for i in 0..nedge_basis {
+                            let left_value = left_lqh_slice[i];
+                            let right_value = right_sols[nedge_basis - 1 - i];
+                            let num_flux = rusanov(left_value, right_value);
+                            let left_scaling = dt / left_jacob_det;
+                            let left_transformed_flux = num_flux * left_scaling;
+                            let left_itest_func = self.space_basis.xi.len() - 1;
+                            residuals[(ilelem, left_itest_func)] -=
+                                edge_weights[i] * left_transformed_flux;
+                        }
+
+                        submesh
+                            .left_bnd
+                            .nodal_coeffs
+                            .assign(&left_lqh_slice.view().slice(s![..;-1]));
                     }
                     (true, false) => {
-                        todo!()
+                        let troubled_index = map_elem_to_troubled_index[&ilelem];
+                        let submesh = &mut sub_meshes[troubled_index];
+                        let local_sols = &sub_solutions[troubled_index];
+
+                        let right_inodes = &self.mesh.elements[irelem].inodes;
+                        let right_x_slice: [f64; 2] =
+                            std::array::from_fn(|i| self.mesh.nodes[right_inodes[i]].x);
+                        let right_jacob_det = Self::compute_interval_length(&right_x_slice);
+                        let nodes_along_edges = &self.space_time_basis.nodes_along_edges;
+                        let local_ids: [usize; 2] = [1, 3];
+                        let right_lqh_slice = lqh.slice(s![irelem, ..]).select(
+                            Axis(0),
+                            nodes_along_edges
+                                .slice(s![local_ids[1], ..])
+                                .as_slice()
+                                .unwrap(),
+                        );
+
+                        let left_sols_along_boundary =
+                            self.shock_tracker.get_solutions_along_boundary(
+                                submesh,
+                                &submesh.right_bnd.iedges,
+                                local_sols,
+                            );
+                        let etas = &self.time_basis.xi; // quadrature points in time direction
+                        let elem_node_coords = Array1::from_iter(
+                            submesh
+                                .right_bnd
+                                .inodes
+                                .iter()
+                                .map(|&node| submesh.nodes[node].y),
+                        );
+                        let elements_in_which_nodes_lie =
+                            Self::find_elements_in_which_nodes_lie(&elem_node_coords, &etas);
+                        let local_coords = Self::compute_local_coords_in_subelements(
+                            &elements_in_which_nodes_lie,
+                            &elem_node_coords,
+                            &etas,
+                        );
+
+                        let mut left_sols = Array1::<f64>::zeros(local_coords.len());
+                        for (i, &local_coord) in local_coords.indexed_iter() {
+                            let local_coord_array = Array1::from_elem(1, local_coord);
+                            let interp_matrix = Self::compute_interp_matrix(
+                                self.solver_param.polynomial_order,
+                                &self.shock_tracker.basis.inv_vandermonde,
+                                &local_coord_array,
+                            );
+                            left_sols[i] =
+                                interp_matrix.dot(&left_sols_along_boundary.slice(s![i, ..]))[0];
+                        }
+
+                        for i in 0..nedge_basis {
+                            let left_value = left_sols[i];
+                            let right_value = right_lqh_slice[nedge_basis - 1 - i];
+                            let num_flux = rusanov(left_value, right_value);
+                            let right_scaling = dt / right_jacob_det;
+                            let right_transformed_flux = -num_flux * right_scaling;
+                            let right_itest_func = 0;
+                            residuals[(irelem, right_itest_func)] -=
+                                edge_weights[i] * right_transformed_flux;
+                        }
+
+                        submesh
+                            .right_bnd
+                            .nodal_coeffs
+                            .assign(&right_lqh_slice.view().slice(s![..;-1]));
                     }
                     (true, true) => {
                         todo!()
@@ -275,7 +383,7 @@ impl<'a> Disc1dBurgers<'a> {
             let jacob_det = Self::compute_interval_length(&x_slice);
             let nodes_along_edges = &self.space_time_basis.nodes_along_edges;
             let local_id: usize = 3;
-            let lqh_slice = lqh.slice(s![ielem, .., ..]).select(
+            let lqh_slice = lqh.slice(s![ielem, ..]).select(
                 Axis(0),
                 nodes_along_edges
                     .slice(s![local_id, ..])
@@ -285,12 +393,12 @@ impl<'a> Disc1dBurgers<'a> {
             let bnd_value = 0.0;
             for i in 0..nedge_basis {
                 let left_value = bnd_value;
-                let right_value = lqh_slice[(i, 0)];
+                let right_value = lqh_slice[i];
                 let bnd_flux = rusanov(left_value, right_value);
                 let scaling = dt / jacob_det;
                 let transformed_flux = -bnd_flux * scaling;
                 let itest_func = 0;
-                residuals[(ielem, itest_func, 0)] -= edge_weights[i] * transformed_flux;
+                residuals[(ielem, itest_func)] -= edge_weights[i] * transformed_flux;
             }
             // right boundary
             let inode: usize = self.mesh.node_num - 1;
@@ -301,7 +409,7 @@ impl<'a> Disc1dBurgers<'a> {
             let jacob_det = Self::compute_interval_length(&x_slice);
             let nodes_along_edges = &self.space_time_basis.nodes_along_edges;
             let local_id: usize = 1;
-            let lqh_slice = lqh.slice(s![ielem, .., ..]).select(
+            let lqh_slice = lqh.slice(s![ielem, ..]).select(
                 Axis(0),
                 nodes_along_edges
                     .slice(s![local_id, ..])
@@ -310,18 +418,18 @@ impl<'a> Disc1dBurgers<'a> {
             );
             let bnd_value = 0.0;
             for i in 0..nedge_basis {
-                let left_value = lqh_slice[(i, 0)];
+                let left_value = lqh_slice[i];
                 let right_value = bnd_value;
                 let bnd_flux = rusanov(left_value, right_value);
                 let scaling = dt / jacob_det;
                 let transformed_flux = bnd_flux * scaling;
                 let itest_func = self.space_basis.xi.len() - 1;
-                residuals[(ielem, itest_func, 0)] -= edge_weights[i] * transformed_flux;
+                residuals[(ielem, itest_func)] -= edge_weights[i] * transformed_flux;
             }
             // multiply inverse mass matrix, accounting for physical domain scaling
             for (ielem, _elem) in self.mesh.elements.iter().enumerate() {
-                let computed = self.space_im_mat.dot(&residuals.slice(s![ielem, .., 0]));
-                residuals.slice_mut(s![ielem, .., 0]).assign(&computed);
+                let computed = self.space_im_mat.dot(&residuals.slice(s![ielem, ..]));
+                residuals.slice_mut(s![ielem, ..]).assign(&computed);
             }
             // update solution
             solutions.scaled_add(1.0, &residuals.view());
@@ -444,14 +552,14 @@ impl<'a> Disc1dBurgers<'a> {
             }
         }
     }
-    fn compute_time_step(&self, solutions: ArrayView3<f64>) -> f64 {
+    fn compute_time_step(&self, solutions: ArrayView2<f64>) -> f64 {
         let ndof = self.space_basis.xi.len();
         let mut time_step: f64 = 1.0e10;
         for (ielem, elem) in self.mesh.elements.iter().enumerate() {
             // Compute average velocity in element
             let mut u = 0.0;
             for idof in 0..ndof {
-                u += solutions[[ielem, idof, 0]];
+                u += solutions[(ielem, idof)];
             }
             u /= ndof as f64;
 
@@ -470,46 +578,44 @@ impl<'a> Disc1dBurgers<'a> {
     }
     fn local_space_time_predictor(
         &self,
-        // mut lqh: ArrayViewMut2<f64>, // (ndof, neq)
-        sol: ArrayView2<f64>, // (ndof, neq)
+        sol: ArrayView1<f64>, // (ndof)
         x_slice: [f64; 2],
         dt: f64,
-    ) -> Array2<f64> {
+    ) -> Array1<f64> {
         let ndof = self.space_time_basis.xi.len();
         let nspace_basis = self.space_basis.xi.len();
-        let mut lqh = Array2::zeros((ndof, 1));
+        let mut lqh = Array1::zeros(ndof);
         let jacob_det = Self::compute_interval_length(&x_slice);
         // Dimensions: (dof, var) for better memory access in Rust
-        let mut lfh = Array2::zeros((ndof, 1)); // flux tensor
+        let mut lfh = Array1::zeros(ndof); // flux tensor
 
         // Initial guess for current element
         for idof in 0..ndof {
             let ix = idof % nspace_basis;
-            lqh[(idof, 0)] = sol[(ix, 0)];
+            lqh[idof] = sol[ix];
         }
 
         // Picard iterations for current element
         for _iter in 0..self.solver_param.polynomial_order + 3 {
             // Compute fluxes
             for idof in 0..ndof {
-                let f = self.physical_flux(lqh[(idof, 0)]);
+                let f = self.physical_flux(lqh[idof]);
                 let transformed_f = dt / jacob_det * f;
-                lfh[(idof, 0)] = transformed_f;
+                lfh[idof] = transformed_f;
             }
             // update lqh
-            let lfh_slice: ArrayView1<f64> = lfh.slice(s![.., 0]);
             // Perform matrix multiplication and store result back in lqh
             let result: Array1<f64> = self
                 .ik1_mat
-                .dot(&(self.f0_mat.dot(&sol.slice(s![.., 0])) - self.kxi_mat.dot(&lfh_slice)));
-            lqh.slice_mut(s![.., 0]).assign(&result);
+                .dot(&(self.f0_mat.dot(&sol) - self.kxi_mat.dot(&lfh)));
+            lqh.assign(&result);
         }
         lqh
     }
     fn volume_integral(
         &self,
         itest_func: usize,
-        lqh: ArrayView2<f64>, // (ndof, neq)
+        lqh: ArrayView1<f64>, // (ndof, neq)
         x_slice: [f64; 2],
         dt: f64,
     ) -> f64 {
@@ -519,7 +625,7 @@ impl<'a> Disc1dBurgers<'a> {
         let jacob_det = Self::compute_interval_length(&x_slice);
         let mut res: f64 = 0.0;
         for igp in 0..ngp {
-            let f = self.physical_flux(lqh[(igp, 0)]);
+            let f = self.physical_flux(lqh[igp]);
             let transformed_f = dt / jacob_det * f;
             let ix = igp % nspace_basis;
             let dtest_func_dxi = self.space_basis.dxi[(ix, itest_func)];
