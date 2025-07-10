@@ -20,12 +20,12 @@ use ndarray::{
 use ndarray_stats::QuantileExt;
 
 use crate::disc::{
+    ader::BoundaryDimension,
     basis::{Basis, lagrange1d::LobattoBasis, triangle::TriangleBasis},
     boundary::scalar1d::PolynomialBoundary,
     geometric::Geometric2D,
     mesh::mesh2d::{Mesh2d, TriangleElement},
 };
-
 pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
     fn compute_initial_guess(&self, mesh: &Mesh2d<TriangleElement>) -> Array2<f64> {
         let mut solutions = Array2::zeros((mesh.elem_num, 1));
@@ -136,10 +136,10 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
                 };
                 let xi = array![0.5];
                 let bnd_value = compute_boundary_value_by_interpolation(
-                    nodal_coeffs.view(),
+                    &nodal_coeffs,
                     self.basis().basis1d.n,
-                    xi.view(),
-                    self.basis().basis1d.inv_vandermonde.view(),
+                    &xi,
+                    &self.basis().basis1d.inv_vandermonde,
                     coord0,
                     coord1,
                 );
@@ -451,10 +451,10 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                     _ => panic!("Invalid boundary normal"),
                 };
                 let bnd_values = compute_boundary_value_by_interpolation(
-                    nodal_coeffs.view(),
+                    &nodal_coeffs,
                     self.basis().basis1d.n,
-                    basis.basis1d.xi.view(),
-                    self.basis().basis1d.inv_vandermonde.view(),
+                    &basis.basis1d.xi,
+                    &self.basis().basis1d.inv_vandermonde,
                     coord0,
                     coord1,
                 );
@@ -942,24 +942,67 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                     _ => panic!("Invalid boundary normal"),
                 };
                 let bnd_values = compute_boundary_value_by_interpolation(
-                    nodal_coeffs.view(),
+                    &nodal_coeffs,
                     self.basis().basis1d.n,
-                    basis.basis1d.xi.view(),
-                    self.basis().basis1d.inv_vandermonde.view(),
+                    &basis.basis1d.xi,
+                    &self.basis().basis1d.inv_vandermonde,
                     coord0,
                     coord1,
                 );
+                let bnd_values_coord0_perturbed = compute_boundary_value_by_interpolation(
+                    &nodal_coeffs,
+                    self.basis().basis1d.n,
+                    &basis.basis1d.xi,
+                    &self.basis().basis1d.inv_vandermonde,
+                    coord0 + 1e-6,
+                    coord1,
+                );
+                let bnd_values_coord1_perturbed = compute_boundary_value_by_interpolation(
+                    &nodal_coeffs,
+                    self.basis().basis1d.n,
+                    &basis.basis1d.xi,
+                    &self.basis().basis1d.inv_vandermonde,
+                    coord0,
+                    coord1 + 1e-6,
+                );
+                let (dbnd_values_dx0, dbnd_values_dx1, dbnd_values_dy0, dbnd_values_dy1) =
+                    match bnd.normal {
+                        // Initial condition
+                        [0.0, -1.0] => (
+                            (&bnd_values_coord0_perturbed - &bnd_values) / 1e-6,
+                            (&bnd_values_coord1_perturbed - &bnd_values) / 1e-6,
+                            Array1::zeros(self.basis().basis1d.n),
+                            Array1::zeros(self.basis().basis1d.n),
+                        ),
+                        // Right boundary
+                        [1.0, 0.0] => (
+                            Array1::zeros(self.basis().basis1d.n),
+                            Array1::zeros(self.basis().basis1d.n),
+                            (&bnd_values_coord0_perturbed - &bnd_values) / 1e-6,
+                            (&bnd_values_coord1_perturbed - &bnd_values) / 1e-6,
+                        ),
+                        // Left boundary
+                        [-1.0, 0.0] => (
+                            Array1::zeros(self.basis().basis1d.n),
+                            Array1::zeros(self.basis().basis1d.n),
+                            (&bnd_values_coord0_perturbed - &bnd_values) / 1e-6,
+                            (&bnd_values_coord1_perturbed - &bnd_values) / 1e-6,
+                        ),
+                        _ => panic!("Invalid boundary normal"),
+                    };
+
                 for i in 0..nedge_basis {
                     let xi = xi_slice[i];
                     let eta = eta_slice[i];
-                    let (boundary_flux, dflux_du, dflux_dx0, dflux_dx1, dflux_dy0, dflux_dy1): (
-                        f64,
-                        f64,
-                        f64,
-                        f64,
-                        f64,
-                        f64,
-                    ) = self.dbnd_flux(
+                    let (
+                        boundary_flux,
+                        dflux_du,
+                        dflux_dbnd_value,
+                        dflux_dx0,
+                        dflux_dx1,
+                        dflux_dy0,
+                        dflux_dy1,
+                    ): (f64, f64, f64, f64, f64, f64, f64) = self.dnum_flux(
                         sol_slice[i],
                         bnd_values[i],
                         x_slice[local_ids[0]],
@@ -970,10 +1013,12 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                     );
                     let mut dflux_dx = [0.0; 3];
                     let mut dflux_dy = [0.0; 3];
-                    dflux_dx[local_ids[0]] = dflux_dx0;
-                    dflux_dx[(local_ids[0] + 1) % 3] = dflux_dx1;
-                    dflux_dy[local_ids[0]] = dflux_dy0;
-                    dflux_dy[(local_ids[0] + 1) % 3] = dflux_dy1;
+                    dflux_dx[local_ids[0]] = dflux_dx0 + dflux_dbnd_value * dbnd_values_dx0[i];
+                    dflux_dx[(local_ids[0] + 1) % 3] =
+                        dflux_dx1 + dflux_dbnd_value * dbnd_values_dx1[i];
+                    dflux_dy[local_ids[0]] = dflux_dy0 + dflux_dbnd_value * dbnd_values_dy0[i];
+                    dflux_dy[(local_ids[0] + 1) % 3] =
+                        dflux_dy1 + dflux_dbnd_value * dbnd_values_dy1[i];
 
                     let mut dscaling_dx = [0.0; 3];
                     let mut dscaling_dy = [0.0; 3];
@@ -1442,7 +1487,7 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
         let delta_x_ndarray = Array1::from_iter(delta_x.iter().copied());
         (delta_u_ndarray, delta_x_ndarray)
     }
-    fn solve(&mut self, mesh: &mut Mesh2d<TriangleElement>, mut solutions: ArrayViewMut2<f64>) {
+    fn solve(&self, mesh: &mut Mesh2d<TriangleElement>, mut solutions: ArrayViewMut2<f64>) {
         let initial_guess = self.compute_initial_guess(mesh);
         let initial_solutions = self.set_initial_solution(mesh, initial_guess.view());
         solutions.assign(&initial_solutions);
@@ -1661,18 +1706,18 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
 }
 // #[autodiff_reverse(dinit_dx, Const, Const, Const, Const, Active, Active, Active)]
 pub fn compute_boundary_value_by_interpolation(
-    source_solution: ArrayView1<f64>,
-    n: usize,                         // order of the source basis
-    xi: ArrayView1<f64>,              // must be mapped to [0, 1] before passing in
-    inv_vandermonde: ArrayView2<f64>, // inverse of the vandermonde matrix of the source basis
+    source_solution: &Array1<f64>,
+    n: usize,                      // order of the source basis
+    xi: &Array1<f64>,              // must be mapped to [0, 1] before passing in
+    inv_vandermonde: &Array2<f64>, // inverse of the vandermonde matrix of the source basis
     x0: f64,
     x1: f64,
 ) -> Array1<f64> {
     let coord = xi.mapv(|x| x * (x1 - x0) + x0);
     let coord_mapped = coord.mapv(|x| x * 2.0 - 1.0);
     let v = LobattoBasis::vandermonde1d(n, coord_mapped.view());
-    let interp_matrix = v.dot(&inv_vandermonde);
-    let values = interp_matrix.dot(&source_solution);
+    let interp_matrix = v.dot(inv_vandermonde);
+    let values = interp_matrix.dot(source_solution);
     values
 }
 // #[autodiff_reverse(dinit_dx_nalgebra, Const, Const, Const, Const, Active, Active, Active)]

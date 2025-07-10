@@ -52,6 +52,7 @@ impl<'a> ShockTrackingSolverQuad<'a> {
     }
 }
 */
+/*
 pub struct ShockTrackingSolverTri<'a, T: SpaceTimeSolver1DScalar + SQP> {
     pub solutions: Array<f64, Ix2>,
     pub disc: T,
@@ -97,7 +98,9 @@ impl<'a, T: SpaceTimeSolver1DScalar + SQP> ShockTrackingSolverTri<'a, T> {
         self.disc.solve(self.solutions.view_mut());
     }
 }
+    */
 
+/*
 pub struct Solver<'a> {
     pub solutions: Array3<f64>,
     pub disc: Disc1dBurgers<'a>,
@@ -136,3 +139,4 @@ impl<'a> Solver<'a> {
         self.disc.solve(self.solutions.view_mut());
     }
 }
+*/

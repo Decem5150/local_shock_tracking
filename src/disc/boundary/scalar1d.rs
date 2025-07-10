@@ -1,7 +1,8 @@
 use ndarray::Array1;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ConstantBoundary {
+    pub inodes: Vec<usize>,
     pub iedges: Vec<usize>,
     pub value: f64,
 }
@@ -10,7 +11,7 @@ pub struct FunctionBoundary {
     pub iedges: Vec<usize>,
     pub func: fn(f64, f64) -> f64,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PolynomialBoundary {
     pub inodes: Vec<usize>,
     pub iedges: Vec<usize>,

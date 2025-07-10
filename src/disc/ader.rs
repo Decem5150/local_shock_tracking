@@ -1,24 +1,21 @@
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2, linalg::kron};
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2, linalg::kron, s};
 use ndarray_linalg::Inverse;
 
-use crate::disc::basis::{
-    Basis, lagrange1d::LobattoBasis, quadrilateral::QuadrilateralBasis, triangle::TriangleBasis,
+use crate::disc::{
+    basis::{
+        Basis, lagrange1d::LobattoBasis, quadrilateral::QuadrilateralBasis, triangle::TriangleBasis,
+    },
+    mesh::mesh2d::{Mesh2d, TriangleElement},
 };
-
+pub enum BoundaryDimension {
+    Spatial,
+    Temporal,
+}
 pub trait ADER1DScalar {
     fn physical_flux(&self, u: f64) -> f64;
 }
 pub trait ADER1DMatrices {
     fn compute_space_mass_mat(basis: &LobattoBasis) -> Array2<f64> {
-        /*
-        let n_pts_2d = basis.xi.len();
-        let n_pts_1d = (n_pts_2d as f64).sqrt() as usize;
-        let mut m_1d = Array2::zeros((n_pts_1d, n_pts_1d));
-        for i in 0..n_pts_1d {
-            m_1d[(i, i)] = basis.quad_w[i];
-        }
-        m_1d
-        */
         0.5 * basis.inv_vandermonde.t().dot(&basis.inv_vandermonde)
     }
     fn compute_space_time_mass_mat(
@@ -69,7 +66,7 @@ pub trait ADER1DMatrices {
         kron(&time_basis_at_zero, &space_mass_mat)
     }
 }
-pub trait ADER1DShockTracking {
+pub trait ADER1DScalarShockTracking: ADER1DMatrices {
     fn compute_subpoint_coords(
         target_basis: &LobattoBasis,
         vertex_coords: ArrayView1<f64>, // local coordinates inside the element
@@ -153,5 +150,89 @@ pub trait ADER1DShockTracking {
             }
         });
         local_coords
+    }
+    fn l2_project(
+        source_coeffs: &Array2<f64>,
+        target_basis: &LobattoBasis,
+        source_basis: &LobattoBasis,
+        source_elem_node_coords: &Array1<f64>,
+    ) -> Array1<f64> {
+        // Evaluate the source solution at the target basis nodes.
+        let target_nodes = &target_basis.xi;
+        let elements_in_which_nodes_lie =
+            Self::find_elements_in_which_nodes_lie(source_elem_node_coords, target_nodes);
+        let local_coords = Self::compute_local_coords_in_subelements(
+            &elements_in_which_nodes_lie,
+            source_elem_node_coords,
+            target_nodes,
+        );
+        let mut uh_at_target_nodes = Array1::<f64>::zeros(local_coords.len());
+        for (i, &local_coord) in local_coords.indexed_iter() {
+            let element_index = elements_in_which_nodes_lie[i];
+            let local_coord_array = Array1::from_elem(1, local_coord);
+            let interp_matrix = Self::compute_interp_matrix(
+                source_basis.n,
+                &source_basis.inv_vandermonde,
+                &local_coord_array,
+            );
+            uh_at_target_nodes[i] =
+                interp_matrix.dot(&source_coeffs.slice(s![element_index, ..]))[0];
+        }
+
+        // Project the evaluated solution onto the target basis.
+        let m_mat = Self::compute_space_mass_mat(target_basis);
+        let im_mat = m_mat.inv().unwrap();
+
+        let weights = &target_basis.weights;
+        let f_vec = &uh_at_target_nodes * weights;
+        im_mat.dot(&f_vec)
+    }
+    fn l2_project_fine_to_coarse(
+        fine_sols: &Array2<f64>,
+        submesh: &Mesh2d<TriangleElement>,
+        boundary_iedges: &[usize],
+        coarse_basis: &LobattoBasis,
+        fine_basis: &LobattoBasis,
+        dim: BoundaryDimension,
+    ) -> Array1<f64> {
+        let get_coord = |inode: usize| match dim {
+            BoundaryDimension::Spatial => submesh.nodes[inode].x,
+            BoundaryDimension::Temporal => submesh.nodes[inode].y,
+        };
+
+        let elem_node_coords = Array1::from_iter(
+            boundary_iedges
+                .iter()
+                .map(|&iedge| get_coord(submesh.edges[iedge].inodes[0]))
+                .chain(std::iter::once(get_coord(
+                    submesh.edges[boundary_iedges[boundary_iedges.len() - 1]].inodes[1],
+                ))),
+        );
+
+        Self::l2_project(fine_sols, coarse_basis, fine_basis, &elem_node_coords)
+    }
+    fn l2_project_coarse_to_fine(
+        coarse_sols: &Array2<f64>,
+        submesh: &Mesh2d<TriangleElement>,
+        boundary_iedges: &[usize],
+        fine_basis: &LobattoBasis,
+        coarse_basis: &LobattoBasis,
+        dim: BoundaryDimension,
+    ) -> Array1<f64> {
+        let get_coord = |inode: usize| match dim {
+            BoundaryDimension::Spatial => submesh.nodes[inode].x,
+            BoundaryDimension::Temporal => submesh.nodes[inode].y,
+        };
+
+        let elem_node_coords = Array1::from_iter(
+            boundary_iedges
+                .iter()
+                .map(|&iedge| get_coord(submesh.edges[iedge].inodes[0]))
+                .chain(std::iter::once(get_coord(
+                    submesh.edges[boundary_iedges[boundary_iedges.len() - 1]].inodes[1],
+                ))),
+        );
+
+        Self::l2_project(coarse_sols, fine_basis, coarse_basis, &elem_node_coords)
     }
 }

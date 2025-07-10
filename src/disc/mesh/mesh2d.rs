@@ -1,7 +1,7 @@
 use crate::disc::boundary::scalar1d::{ConstantBoundary, PolynomialBoundary};
 
 use super::mesh1d::Node;
-use ndarray::ArrayView1;
+use ndarray::{Array1, ArrayView1};
 
 #[derive(Clone, Debug)]
 pub struct FlowInBoundary {
@@ -257,6 +257,7 @@ impl<T: Element2d> Mesh2d<T> {
         println!("-----------------------------");
     }
 }
+/*
 impl Mesh2d<QuadrilateralElement> {
     pub fn create_two_quad_mesh() -> Mesh2d<QuadrilateralElement> {
         let nodes = vec![
@@ -357,10 +358,17 @@ impl Mesh2d<QuadrilateralElement> {
             elements,
             constant_bnds: vec![],
             polynomial_bnds: vec![],
-            interior_edges,
-            boundary_edges,
-            side_edges: vec![],
-            final_edges: vec![],
+            lower_bnd: PolynomialBoundary {
+                inodes: vec![],
+                iedges: vec![],
+                nodal_coeffs: Array1::zeros(0),
+
+            },
+            right_bnd: PolynomialBoundary {
+                iedges: vec![],
+                value: vec![],
+            },
+            upper_bnd: ConstantBoundary {
             free_bnd_x,
             free_bnd_y,
             interior_nodes,
@@ -370,7 +378,9 @@ impl Mesh2d<QuadrilateralElement> {
         mesh
     }
 }
+*/
 impl Mesh2d<TriangleElement> {
+    /*
     pub fn create_four_tri_mesh() -> Mesh2d<TriangleElement> {
         let nodes = vec![
             Node {
@@ -526,6 +536,7 @@ impl Mesh2d<TriangleElement> {
         };
         mesh
     }
+    */
     pub fn create_eight_tri_mesh() -> Mesh2d<TriangleElement> {
         let nodes = vec![
             Node {
@@ -535,50 +546,50 @@ impl Mesh2d<TriangleElement> {
                 local_ids: vec![0, 0],
             },
             Node {
-                x: 1.0,
+                x: 0.5,
                 y: 0.0,
                 parents: vec![0, 2, 3],
                 local_ids: vec![1, 0, 0],
             },
             Node {
-                x: 2.0,
+                x: 1.0,
                 y: 0.0,
                 parents: vec![2],
                 local_ids: vec![1],
             },
             Node {
                 x: 0.0,
-                y: 1.0,
+                y: 0.5,
                 parents: vec![1, 4, 5],
                 local_ids: vec![2, 0, 0],
             },
             Node {
-                x: 1.0,
-                y: 1.0,
+                x: 0.5,
+                y: 0.5,
                 parents: vec![0, 1, 3, 4, 6, 7],
                 local_ids: vec![2, 1, 2, 1, 0, 0],
             },
             Node {
-                x: 2.0,
-                y: 1.0,
+                x: 1.0,
+                y: 0.5,
                 parents: vec![2, 3, 6],
                 local_ids: vec![2, 1, 1],
             },
             Node {
                 x: 0.0,
-                y: 2.0,
+                y: 1.0,
                 parents: vec![5],
                 local_ids: vec![2],
             },
             Node {
-                x: 1.0,
-                y: 2.0,
+                x: 0.5,
+                y: 1.0,
                 parents: vec![4, 5, 7],
                 local_ids: vec![2, 1, 2],
             },
             Node {
-                x: 2.0,
-                y: 2.0,
+                x: 1.0,
+                y: 1.0,
                 parents: vec![6, 7],
                 local_ids: vec![2, 1],
             },
@@ -672,25 +683,33 @@ impl Mesh2d<TriangleElement> {
 
         let constant_bnds = vec![
             ConstantBoundary {
-                iedges: vec![0, 6, 9],
+                inodes: vec![0, 1],
+                iedges: vec![0],
                 value: 2.0,
             },
             ConstantBoundary {
+                inodes: vec![1, 2],
                 iedges: vec![1],
                 value: 1.0,
             },
             ConstantBoundary {
-                iedges: vec![4, 5, 8, 11],
+                inodes: vec![2, 5, 8],
+                iedges: vec![8, 11],
                 value: 0.0,
+            },
+            ConstantBoundary {
+                inodes: vec![8, 7, 6],
+                iedges: vec![5, 4],
+                value: 0.0,
+            },
+            ConstantBoundary {
+                inodes: vec![6, 3, 0],
+                iedges: vec![9, 6],
+                value: 2.0,
             },
         ];
 
-        let boundary_edges = vec![0, 1, 4, 5, 6, 8, 9, 11];
         let interior_edges = vec![2, 3, 7, 10, 12, 13, 14, 15];
-
-        let initial_edges = vec![0, 1];
-        let side_edges = vec![6, 8, 9, 11];
-        let final_edges = vec![4, 5];
 
         let elements: Vec<TriangleElement> = vec![
             TriangleElement {
@@ -744,9 +763,29 @@ impl Mesh2d<TriangleElement> {
             constant_bnds,
             polynomial_bnds: vec![],
             interior_edges,
-            boundary_edges,
-            side_edges,
-            final_edges,
+            lower_bnd: PolynomialBoundary {
+                inodes: vec![],
+                iedges: vec![],
+                nodal_coeffs: Array1::zeros(0),
+                normal: [0.0, -1.0],
+            },
+            right_bnd: PolynomialBoundary {
+                inodes: vec![],
+                iedges: vec![],
+                nodal_coeffs: Array1::zeros(0),
+                normal: [1.0, 0.0],
+            },
+            upper_bnd: ConstantBoundary {
+                inodes: vec![],
+                iedges: vec![],
+                value: 0.0,
+            },
+            left_bnd: PolynomialBoundary {
+                inodes: vec![],
+                iedges: vec![],
+                nodal_coeffs: Array1::zeros(0),
+                normal: [-1.0, 0.0],
+            },
             free_bnd_x,
             free_bnd_y,
             interior_nodes,
@@ -758,11 +797,13 @@ impl Mesh2d<TriangleElement> {
     pub fn create_tri_mesh(n_nodes_per_dim: usize) -> Mesh2d<TriangleElement> {
         let node_num = n_nodes_per_dim * n_nodes_per_dim;
         let mut nodes = Vec::with_capacity(node_num);
+        let h = 1.0 / (n_nodes_per_dim - 1) as f64;
+
         for i in 0..n_nodes_per_dim {
             for j in 0..n_nodes_per_dim {
                 nodes.push(Node {
-                    x: j as f64,
-                    y: i as f64,
+                    x: j as f64 * h,
+                    y: i as f64 * h,
                     parents: Vec::new(),
                     local_ids: Vec::new(),
                 });
@@ -844,15 +885,12 @@ impl Mesh2d<TriangleElement> {
             elements[elem_idx].ineighbors = neighbors;
         }
 
-        let boundary_edges: Vec<usize> = (0..edges.len())
-            .filter(|&i| edges[i].parents.len() == 1)
-            .collect();
         let interior_edges: Vec<usize> = (0..edges.len())
             .filter(|&i| edges[i].parents.len() == 2)
             .collect();
 
         let mut top_edges = Vec::new();
-        for j in 0..n_nodes_per_dim - 1 {
+        for j in (0..n_nodes_per_dim - 1).rev() {
             let n1 = (n_nodes_per_dim - 1) * n_nodes_per_dim + j;
             let n2 = (n_nodes_per_dim - 1) * n_nodes_per_dim + j + 1;
             top_edges.push(*edge_map.get(&(n1.min(n2), n1.max(n2))).unwrap());
@@ -865,50 +903,65 @@ impl Mesh2d<TriangleElement> {
             right_edges.push(*edge_map.get(&(n1.min(n2), n1.max(n2))).unwrap());
         }
 
-        let flow_out_bnds = vec![FlowOutBoundary {
-            iedges: [top_edges, right_edges].concat(),
-        }];
-
         let mut left_edges = Vec::new();
-        for i in 0..n_nodes_per_dim - 1 {
+        for i in (0..n_nodes_per_dim - 1).rev() {
             let n1 = i * n_nodes_per_dim;
             let n2 = (i + 1) * n_nodes_per_dim;
             left_edges.push(*edge_map.get(&(n1.min(n2), n1.max(n2))).unwrap());
         }
 
-        let n_segments_bottom = n_nodes_per_dim - 1;
-        let split_idx = n_segments_bottom / 2;
-
-        let mut bottom_edges_left = Vec::new();
-        for j in 0..split_idx {
+        let mut bottom_edges = Vec::new();
+        for j in 0..n_nodes_per_dim - 1 {
             let n1 = j;
             let n2 = j + 1;
-            bottom_edges_left.push(*edge_map.get(&(n1.min(n2), n1.max(n2))).unwrap());
+            bottom_edges.push(*edge_map.get(&(n1.min(n2), n1.max(n2))).unwrap());
         }
 
-        let mut bottom_edges_right = Vec::new();
-        for j in split_idx..n_segments_bottom {
-            let n1 = j;
-            let n2 = j + 1;
-            bottom_edges_right.push(*edge_map.get(&(n1.min(n2), n1.max(n2))).unwrap());
-        }
+        let top_nodes: Vec<usize> = (0..n_nodes_per_dim)
+            .rev()
+            .map(|j| (n_nodes_per_dim - 1) * n_nodes_per_dim + j)
+            .collect();
 
-        let mut flow_in_bnds = Vec::new();
-        let mut flow_in_edges_val2 = left_edges;
-        flow_in_edges_val2.extend(bottom_edges_left);
+        let right_nodes: Vec<usize> = (0..n_nodes_per_dim)
+            .map(|i| i * n_nodes_per_dim + (n_nodes_per_dim - 1))
+            .collect();
 
-        if !flow_in_edges_val2.is_empty() {
-            flow_in_bnds.push(FlowInBoundary {
-                iedges: flow_in_edges_val2,
-                value: 2.0,
-            });
-        }
-        if !bottom_edges_right.is_empty() {
-            flow_in_bnds.push(FlowInBoundary {
-                iedges: bottom_edges_right,
-                value: 1.0,
-            });
-        }
+        let left_nodes: Vec<usize> = (0..n_nodes_per_dim)
+            .rev()
+            .map(|i| i * n_nodes_per_dim)
+            .collect();
+
+        let bottom_nodes: Vec<usize> = (0..n_nodes_per_dim).collect();
+
+        let lower_bnd = PolynomialBoundary {
+            inodes: bottom_nodes,
+            iedges: bottom_edges,
+            nodal_coeffs: Array1::zeros(0),
+            normal: [0.0, -1.0],
+        };
+
+        let right_bnd = PolynomialBoundary {
+            inodes: right_nodes,
+            iedges: right_edges,
+            nodal_coeffs: Array1::zeros(0),
+            normal: [1.0, 0.0],
+        };
+
+        let upper_bnd = ConstantBoundary {
+            inodes: top_nodes,
+            iedges: top_edges,
+            value: 0.0,
+        };
+
+        let left_bnd = PolynomialBoundary {
+            inodes: left_nodes,
+            iedges: left_edges,
+            nodal_coeffs: Array1::zeros(0),
+            normal: [-1.0, 0.0],
+        };
+
+        let constant_bnds = vec![upper_bnd.clone()];
+        let polynomial_bnds = vec![lower_bnd.clone(), right_bnd.clone(), left_bnd.clone()];
 
         let mut interior_nodes = Vec::new();
         for i in 1..n_nodes_per_dim - 1 {
@@ -936,12 +989,13 @@ impl Mesh2d<TriangleElement> {
             nodes,
             edges,
             elements,
-            constant_bnds: vec![],
-            polynomial_bnds: vec![],
+            constant_bnds,
+            polynomial_bnds,
+            lower_bnd,
+            right_bnd,
+            upper_bnd,
+            left_bnd,
             interior_edges,
-            boundary_edges,
-            side_edges: vec![],
-            final_edges: vec![],
             free_bnd_x,
             free_bnd_y,
             interior_nodes,

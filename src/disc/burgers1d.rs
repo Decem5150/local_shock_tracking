@@ -8,7 +8,7 @@ use super::mesh::{
     mesh1d::Mesh1d,
     mesh2d::{Mesh2d, TriangleElement},
 };
-use crate::disc::ader::ADER1DShockTracking;
+use crate::disc::ader::{ADER1DScalarShockTracking, BoundaryDimension};
 use crate::disc::{SQP, SpaceTimeSolver1DScalar, geometric::Geometric1D};
 use crate::disc::{
     ader::{ADER1DMatrices, ADER1DScalar},
@@ -138,7 +138,8 @@ impl<'a> Disc1dBurgers<'a> {
                 dt = self.solver_param.final_time - self.current_time;
             }
 
-            let mut map_elem_to_troubled_index = HashMap::<usize, usize>::new();
+            let mut map_ielem_to_itroubled = HashMap::<usize, usize>::new();
+            let mut map_itroubled_to_ielem = Vec::<usize>::new();
             let mut troubled_count = 0;
 
             for (ielem, elem) in self.mesh.elements.iter().enumerate() {
@@ -164,7 +165,8 @@ impl<'a> Disc1dBurgers<'a> {
                         sub_solutions.push(local_solutions);
                         sub_meshes.push(submesh);
 
-                        map_elem_to_troubled_index.insert(ielem, troubled_count);
+                        map_ielem_to_itroubled.insert(ielem, troubled_count);
+                        map_itroubled_to_ielem.push(ielem);
                         troubled_count += 1;
                     }
                 }
@@ -231,9 +233,9 @@ impl<'a> Disc1dBurgers<'a> {
                         }
                     }
                     (false, true) => {
-                        let troubled_index = map_elem_to_troubled_index[&irelem];
+                        let troubled_index = map_ielem_to_itroubled[&irelem];
                         let submesh = &mut sub_meshes[troubled_index];
-                        let local_sols = &sub_solutions[troubled_index];
+                        let local_sols = &mut sub_solutions[troubled_index];
 
                         let left_inodes = &self.mesh.elements[ilelem].inodes;
                         let left_x_slice: [f64; 2] =
@@ -255,33 +257,15 @@ impl<'a> Disc1dBurgers<'a> {
                                 &submesh.left_bnd.iedges,
                                 local_sols,
                             );
-                        let etas = &self.time_basis.xi; // quadrature points in time direction
-                        let elem_node_coords = Array1::from_iter(
-                            submesh
-                                .left_bnd
-                                .inodes
-                                .iter()
-                                .map(|&node| submesh.nodes[node].y),
-                        );
-                        let elements_in_which_nodes_lie =
-                            Self::find_elements_in_which_nodes_lie(&elem_node_coords, &etas);
-                        let local_coords = Self::compute_local_coords_in_subelements(
-                            &elements_in_which_nodes_lie,
-                            &elem_node_coords,
-                            &etas,
-                        );
 
-                        let mut right_sols = Array1::<f64>::zeros(local_coords.len());
-                        for (i, &local_coord) in local_coords.indexed_iter() {
-                            let local_coord_array = Array1::from_elem(1, local_coord);
-                            let interp_matrix = Self::compute_interp_matrix(
-                                self.solver_param.polynomial_order,
-                                &self.shock_tracker.basis.inv_vandermonde,
-                                &local_coord_array,
-                            );
-                            right_sols[i] =
-                                interp_matrix.dot(&right_sols_along_boundary.slice(s![i, ..]))[0];
-                        }
+                        let right_sols = Self::l2_project_fine_to_coarse(
+                            &right_sols_along_boundary,
+                            submesh,
+                            &submesh.left_bnd.iedges,
+                            &self.time_basis,
+                            &self.shock_tracker.basis.basis1d,
+                            BoundaryDimension::Spatial,
+                        );
 
                         for i in 0..nedge_basis {
                             let left_value = left_lqh_slice[i];
@@ -300,9 +284,9 @@ impl<'a> Disc1dBurgers<'a> {
                             .assign(&left_lqh_slice.view().slice(s![..;-1]));
                     }
                     (true, false) => {
-                        let troubled_index = map_elem_to_troubled_index[&ilelem];
+                        let troubled_index = map_ielem_to_itroubled[&ilelem];
                         let submesh = &mut sub_meshes[troubled_index];
-                        let local_sols = &sub_solutions[troubled_index];
+                        let local_sols = &mut sub_solutions[troubled_index];
 
                         let right_inodes = &self.mesh.elements[irelem].inodes;
                         let right_x_slice: [f64; 2] =
@@ -324,33 +308,15 @@ impl<'a> Disc1dBurgers<'a> {
                                 &submesh.right_bnd.iedges,
                                 local_sols,
                             );
-                        let etas = &self.time_basis.xi; // quadrature points in time direction
-                        let elem_node_coords = Array1::from_iter(
-                            submesh
-                                .right_bnd
-                                .inodes
-                                .iter()
-                                .map(|&node| submesh.nodes[node].y),
-                        );
-                        let elements_in_which_nodes_lie =
-                            Self::find_elements_in_which_nodes_lie(&elem_node_coords, &etas);
-                        let local_coords = Self::compute_local_coords_in_subelements(
-                            &elements_in_which_nodes_lie,
-                            &elem_node_coords,
-                            &etas,
-                        );
 
-                        let mut left_sols = Array1::<f64>::zeros(local_coords.len());
-                        for (i, &local_coord) in local_coords.indexed_iter() {
-                            let local_coord_array = Array1::from_elem(1, local_coord);
-                            let interp_matrix = Self::compute_interp_matrix(
-                                self.solver_param.polynomial_order,
-                                &self.shock_tracker.basis.inv_vandermonde,
-                                &local_coord_array,
-                            );
-                            left_sols[i] =
-                                interp_matrix.dot(&left_sols_along_boundary.slice(s![i, ..]))[0];
-                        }
+                        let left_sols = Self::l2_project_fine_to_coarse(
+                            &left_sols_along_boundary,
+                            submesh,
+                            &submesh.right_bnd.iedges,
+                            &self.time_basis,
+                            &self.shock_tracker.basis.basis1d,
+                            BoundaryDimension::Spatial,
+                        );
 
                         for i in 0..nedge_basis {
                             let left_value = left_sols[i];
@@ -373,6 +339,41 @@ impl<'a> Disc1dBurgers<'a> {
                     }
                 }
             }
+
+            ndarray::azip!((
+                submesh in &mut sub_meshes,
+                local_sols in &mut sub_solutions,
+            )
+                {
+                    self.shock_tracker.solve(submesh, local_sols.view_mut());
+                }
+            );
+
+            /*
+            // Transfer the upper boundary solutions on submesh to the element
+            for (itroubled, &ielem) in map_itroubled_to_ielem.iter().enumerate() {
+                let submesh = &mut sub_meshes[itroubled];
+                let local_sols = &mut sub_solutions[itroubled];
+
+                let sols_along_boundary = self.shock_tracker.get_solutions_along_boundary(
+                    submesh,
+                    &submesh.upper_bnd.iedges,
+                    local_sols,
+                );
+
+                let upper_sols = Self::l2_project_onto_boundary(
+                    sols_along_boundary,
+                    submesh,
+                    &submesh.upper_bnd.iedges,
+                    &self.space_basis,
+                    &self.shock_tracker.basis.basis1d,
+                    BoundaryDimension::Spatial,
+                );
+
+                let upper_sols_rev = upper_sols.slice(s![..;-1]);
+                solutions.slice_mut(s![ielem, ..]).assign(&upper_sols_rev);
+            }
+            */
             // apply bc
             // left boundary
             let inode: usize = 0;
@@ -428,8 +429,13 @@ impl<'a> Disc1dBurgers<'a> {
             }
             // multiply inverse mass matrix, accounting for physical domain scaling
             for (ielem, _elem) in self.mesh.elements.iter().enumerate() {
-                let computed = self.space_im_mat.dot(&residuals.slice(s![ielem, ..]));
-                residuals.slice_mut(s![ielem, ..]).assign(&computed);
+                match is_troubled[ielem] {
+                    false => {
+                        let computed = self.space_im_mat.dot(&residuals.slice(s![ielem, ..]));
+                        residuals.slice_mut(s![ielem, ..]).assign(&computed);
+                    }
+                    true => {}
+                }
             }
             // update solution
             solutions.scaled_add(1.0, &residuals.view());
@@ -641,4 +647,4 @@ impl ADER1DScalar for Disc1dBurgers<'_> {
 }
 impl ADER1DMatrices for Disc1dBurgers<'_> {}
 impl Geometric1D for Disc1dBurgers<'_> {}
-impl ADER1DShockTracking for Disc1dBurgers<'_> {}
+impl ADER1DScalarShockTracking for Disc1dBurgers<'_> {}

@@ -162,12 +162,6 @@ impl<'a> SpaceTimeSolver1DScalar for Disc1dAdvectionSpaceTimeTri<'a> {
     fn interp_node_to_enriched_quadrature(&self) -> &Array2<f64> {
         &self.interp_node_to_enriched_quadrature
     }
-    fn mesh(&self) -> &Mesh2d<TriangleElement> {
-        self.mesh
-    }
-    fn mesh_mut(&mut self) -> &mut Mesh2d<TriangleElement> {
-        self.mesh
-    }
     #[autodiff_reverse(
         dvolume, Const, Const, Const, Duplicated, Duplicated, Duplicated, Active
     )]
@@ -275,7 +269,11 @@ impl<'a> SpaceTimeSolver1DScalar for Disc1dAdvectionSpaceTimeTri<'a> {
     }
 }
 impl P0Solver for Disc1dAdvectionSpaceTimeTri<'_> {
-    fn compute_time_steps(&self, _solutions: ArrayView2<f64>) -> Array1<f64> {
+    fn compute_time_steps(
+        &self,
+        mesh: &Mesh2d<TriangleElement>,
+        _solutions: ArrayView2<f64>,
+    ) -> Array1<f64> {
         let nelem = self.mesh.elem_num;
         let mut dts = Array1::zeros(nelem);
         let cfl = 0.5;
@@ -283,9 +281,9 @@ impl P0Solver for Disc1dAdvectionSpaceTimeTri<'_> {
         for (ielem, elem) in self.mesh.elements.iter().enumerate() {
             let mut max_len_sq = std::f64::MAX;
             for &iedge in &elem.iedges {
-                let edge = &self.mesh().edges[iedge];
-                let n0 = &self.mesh().nodes[edge.inodes[0]];
-                let n1 = &self.mesh().nodes[edge.inodes[1]];
+                let edge = &mesh.edges[iedge];
+                let n0 = &mesh.nodes[edge.inodes[0]];
+                let n1 = &mesh.nodes[edge.inodes[1]];
                 let len_sq = (n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2);
                 if len_sq < max_len_sq {
                     max_len_sq = len_sq;

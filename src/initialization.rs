@@ -11,7 +11,7 @@ use crate::{
         },
     },
     io::params_parser::SolverParamParser,
-    solver::{ShockTrackingSolverTri, SolverParameters},
+    solver::SolverParameters,
 };
 
 pub fn initialize_params_by_file(file_path: &str) -> SolverParameters {
@@ -42,9 +42,11 @@ pub fn initialize_params() -> SolverParameters {
 pub fn initialize_mesh1d(node_num: usize, left_coord: f64, right_coord: f64) -> Mesh1d {
     Mesh1d::new(node_num, left_coord, right_coord)
 }
+/*
 pub fn initialize_two_element_mesh2d() -> Mesh2d<QuadrilateralElement> {
     Mesh2d::create_two_quad_mesh()
 }
+*/
 /*
 pub fn initialize_quad_solver<'a>(
     mesh: &'a mut Mesh2d<QuadrilateralElement>,
@@ -56,21 +58,6 @@ pub fn initialize_quad_solver<'a>(
     solver
 }
 */
-
-pub fn initialize_tri_solver<'a>(
-    mesh: &'a mut Mesh2d<TriangleElement>,
-    basis: TriangleBasis,
-    enriched_basis: TriangleBasis,
-    solver_param: &'a SolverParameters,
-) -> ShockTrackingSolverTri<'a, Disc1dBurgers1dSpaceTime<'a>> {
-    let solver = ShockTrackingSolverTri::<Disc1dBurgers1dSpaceTime>::new(
-        basis,
-        enriched_basis,
-        mesh,
-        solver_param,
-    );
-    solver
-}
 
 /*
 pub fn initialize_tri_solver<'a>(

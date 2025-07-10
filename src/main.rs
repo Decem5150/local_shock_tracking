@@ -13,7 +13,6 @@ use crate::disc::basis::quadrilateral::QuadrilateralBasis;
 use crate::disc::burgers1d_space_time::Disc1dBurgers1dSpaceTime;
 use crate::disc::{SQP, SpaceTimeSolver1DScalar};
 use crate::initialization::initialize_mesh1d;
-use crate::solver::{ShockTrackingSolverTri, Solver};
 fn main() {
     let solver_params = initialization::initialize_params_by_file("inputs/solverparam.json");
     let basis = TriangleBasis::new(solver_params.polynomial_order);
@@ -22,11 +21,20 @@ fn main() {
     // let time_basis = LobattoBasis::new(solver_params.polynomial_order);
     // let space_time_basis = QuadrilateralBasis::new(solver_params.polynomial_order);
 
+    let mesh = Mesh2d::create_tri_mesh(3);
+    mesh.print_free_node_coords();
+    println!("mesh.lower_bnd: {:?}", mesh.lower_bnd);
+    println!("mesh.right_bnd: {:?}", mesh.right_bnd);
+    println!("mesh.upper_bnd: {:?}", mesh.upper_bnd);
+    println!("mesh.left_bnd: {:?}", mesh.left_bnd);
+
+    /*
     let mut mesh = Mesh2d::create_eight_tri_mesh();
     let mut solutions = Array2::<f64>::zeros((mesh.elem_num, basis.r.len()));
     let mut disc = Disc1dBurgers1dSpaceTime::new(basis, enriched_basis, &mut mesh, &solver_params);
     disc.initialize_solution(solutions.view_mut());
     disc.solve(solutions.view_mut());
+    */
     // let mesh = initialize_mesh1d(40, -1.0, 1.0);
 
     // let mut solver =
