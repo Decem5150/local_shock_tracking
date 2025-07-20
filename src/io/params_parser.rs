@@ -7,6 +7,7 @@ pub struct SolverParamParser {
     pub final_time: f64,
     pub final_step: usize,
     pub polynomial_order: usize,
+    pub shock_tracking_order: usize,
 }
 impl SolverParamParser {
     pub fn parse(file_path: &str) -> Self {

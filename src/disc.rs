@@ -7,22 +7,21 @@ pub mod geometric;
 pub mod mesh;
 // pub mod riemann_solver;
 // pub mod advection1d_space_time_quad;
-pub mod advection1d_space_time_tri;
+// pub mod advection1d_space_time_tri;
 pub mod burgers1d;
 pub mod burgers1d_space_time;
 // pub mod euler1d;
 use faer::{Col, linalg::solvers::DenseSolveCore, prelude::Solve};
 use faer_ext::{IntoFaer, IntoNdarray};
-use nalgebra::{DMatrix, DVector, dvector};
+use nalgebra::{DMatrix, DVector, coordinates::X, dvector};
 use ndarray::{
     Array, Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, Axis, array, concatenate, s,
 };
 use ndarray_stats::QuantileExt;
 
 use crate::disc::{
-    ader::BoundaryDimension,
     basis::{Basis, lagrange1d::LobattoBasis, triangle::TriangleBasis},
-    boundary::scalar1d::PolynomialBoundary,
+    boundary::{BoundaryPosition, scalar1d::PolynomialBoundary},
     geometric::Geometric2D,
     mesh::mesh2d::{Mesh2d, TriangleElement},
 };
@@ -32,8 +31,8 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
         self.initialize_solution(solutions.view_mut());
         let nelem = mesh.elem_num;
         let mut residuals = Array2::<f64>::zeros((nelem, 1));
-        let max_iter = 5000;
-        let tol = 1e-12;
+        let max_iter = 1000;
+        let tol = 1e-10;
 
         for i in 0..max_iter {
             self.compute_p0_residuals(mesh, solutions.view(), residuals.view_mut());
@@ -58,8 +57,11 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
                 let x: [f64; 3] = std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].x);
                 let y: [f64; 3] = std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].y);
                 let area = Self::compute_element_area(&x, &y);
+
                 solutions[[ielem, 0]] -= dts[ielem] / area * residuals[[ielem, 0]];
             }
+            println!("iter: {:?}", i);
+            println!("p0_solutions: {:?}", solutions);
         }
         println!("PTC did not converge within {} iterations.", max_iter);
         solutions
@@ -91,7 +93,6 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
             // The node ordering in edge.inodes is assumed to be counter-clockwise for the left element,
             // so the normal computed from (n0, n1) will point from left to right.
             let flux = self.compute_numerical_flux(u_left, u_right, n0.x, n1.x, n0.y, n1.y);
-            println!("flux: {:?}", flux);
             residuals[(ileft, 0)] += flux * edge_length;
             residuals[(iright, 0)] -= flux * edge_length;
         }
@@ -118,6 +119,7 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
         for bnd in &mesh.polynomial_bnds {
             let iedges = &bnd.iedges;
             let nodal_coeffs = &bnd.nodal_coeffs;
+
             for &iedge in iedges {
                 let edge = &mesh.edges[iedge];
                 let ielem = edge.parents[0];
@@ -125,13 +127,16 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
                 let n0 = &mesh.nodes[edge.inodes[0]];
                 let n1 = &mesh.nodes[edge.inodes[1]];
                 let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
-                let (coord0, coord1) = match bnd.normal {
-                    // Initial condition
-                    [0.0, -1.0] => (mesh.nodes[edge.inodes[0]].x, mesh.nodes[edge.inodes[1]].x),
-                    // Right boundary
-                    [1.0, 0.0] => (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y),
-                    // Left boundary
-                    [-1.0, 0.0] => (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y),
+                let (coord0, coord1) = match bnd.position {
+                    BoundaryPosition::Lower => {
+                        (mesh.nodes[edge.inodes[0]].x, mesh.nodes[edge.inodes[1]].x)
+                    }
+                    BoundaryPosition::Right => {
+                        (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y)
+                    }
+                    BoundaryPosition::Left => {
+                        (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y)
+                    }
                     _ => panic!("Invalid boundary normal"),
                 };
                 let xi = array![0.5];
@@ -143,8 +148,22 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
                     coord0,
                     coord1,
                 );
-                let flux = self.compute_boundary_flux(u, bnd_value[0], n0.x, n1.x, n0.y, n1.y);
 
+                let flux = self.compute_boundary_flux(u, bnd_value[0], n0.x, n1.x, n0.y, n1.y);
+                residuals[(ielem, 0)] += flux * edge_length;
+            }
+        }
+        // Open boundaries
+        for bnd in &mesh.open_bnds {
+            let iedges = &bnd.iedges;
+            for &iedge in iedges {
+                let edge = &mesh.edges[iedge];
+                let ielem = edge.parents[0];
+                let u = solutions[(ielem, 0)];
+                let n0 = &mesh.nodes[edge.inodes[0]];
+                let n1 = &mesh.nodes[edge.inodes[1]];
+                let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
+                let flux = self.compute_open_boundary_flux(u, n0.x, n1.x, n0.y, n1.y);
                 residuals[(ielem, 0)] += flux * edge_length;
             }
         }
@@ -441,13 +460,16 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         .as_slice()
                         .unwrap(),
                 );
-                let (coord0, coord1) = match bnd.normal {
-                    // Initial condition
-                    [0.0, -1.0] => (mesh.nodes[edge.inodes[0]].x, mesh.nodes[edge.inodes[1]].x),
-                    // Right boundary
-                    [1.0, 0.0] => (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y),
-                    // Left boundary
-                    [-1.0, 0.0] => (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y),
+                let (coord0, coord1) = match bnd.position {
+                    BoundaryPosition::Lower => {
+                        (mesh.nodes[edge.inodes[0]].x, mesh.nodes[edge.inodes[1]].x)
+                    }
+                    BoundaryPosition::Right => {
+                        (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y)
+                    }
+                    BoundaryPosition::Left => {
+                        (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y)
+                    }
                     _ => panic!("Invalid boundary normal"),
                 };
                 let bnd_values = compute_boundary_value_by_interpolation(
@@ -468,6 +490,69 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         mesh.nodes[edge.inodes[1]].x,
                         mesh.nodes[edge.inodes[0]].y,
                         mesh.nodes[edge.inodes[1]].y,
+                    );
+                    let scaling =
+                        self.compute_flux_scaling(xi, eta, ref_normal, &x_slice, &y_slice);
+                    let transformed_flux = boundary_flux * scaling;
+                    let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
+                    residuals[(ielem, itest_func)] +=
+                        0.5 * edge_length * edge_weights[i] * transformed_flux;
+                }
+            }
+        }
+        // Open boundaries
+        for bnd in &mesh.open_bnds {
+            let iedges = &bnd.iedges;
+            for &iedge in iedges {
+                let edge = &mesh.edges[iedge];
+                let ielem = edge.parents[0];
+                let elem = &mesh.elements[ielem];
+                let inodes = &elem.inodes;
+                let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
+                let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
+                let sol_nodes_along_edges = &self.basis().nodes_along_edges;
+                let nodes_along_edges = &basis.nodes_along_edges;
+                let local_ids = &edge.local_ids;
+                let ref_normal = Self::compute_ref_normal(local_ids[0]);
+                let edge_length = Self::compute_ref_edge_length(local_ids[0]);
+                let sol_slice = {
+                    let sol_slice = solutions.slice(s![ielem, ..]).select(
+                        Axis(0),
+                        sol_nodes_along_edges
+                            .slice(s![local_ids[0], ..])
+                            .as_slice()
+                            .unwrap(),
+                    );
+                    if is_enriched {
+                        self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                    } else {
+                        sol_slice
+                    }
+                };
+                let xi_slice = basis.r.select(
+                    Axis(0),
+                    nodes_along_edges
+                        .slice(s![local_ids[0], ..])
+                        .as_slice()
+                        .unwrap(),
+                );
+                let eta_slice = basis.s.select(
+                    Axis(0),
+                    nodes_along_edges
+                        .slice(s![local_ids[0], ..])
+                        .as_slice()
+                        .unwrap(),
+                );
+                for i in 0..nedge_basis {
+                    let u = sol_slice[i];
+                    let xi = xi_slice[i];
+                    let eta = eta_slice[i];
+                    let boundary_flux = self.compute_open_boundary_flux(
+                        u,
+                        x_slice[local_ids[0]],
+                        x_slice[(local_ids[0] + 1) % 3],
+                        y_slice[local_ids[0]],
+                        y_slice[(local_ids[0] + 1) % 3],
                     );
                     let scaling =
                         self.compute_flux_scaling(xi, eta, ref_normal, &x_slice, &y_slice);
@@ -694,6 +779,7 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
 
                 let left_itest_func = basis.nodes_along_edges[(local_ids[0], i)];
                 let right_itest_func = basis.nodes_along_edges[(local_ids[1], nedge_basis - 1 - i)];
+
                 residuals[(ilelem, left_itest_func)] +=
                     0.5 * left_edge_length * edge_weights[i] * left_transformed_flux;
                 residuals[(irelem, right_itest_func)] +=
@@ -827,6 +913,7 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         y_slice[(local_ids[0] + 1) % 3],
                         1.0,
                     );
+
                     let mut dflux_dx = [0.0; 3];
                     let mut dflux_dy = [0.0; 3];
                     dflux_dx[local_ids[0]] = dflux_dx0;
@@ -932,13 +1019,16 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         .as_slice()
                         .unwrap(),
                 );
-                let (coord0, coord1) = match bnd.normal {
-                    // Initial condition
-                    [0.0, -1.0] => (mesh.nodes[edge.inodes[0]].x, mesh.nodes[edge.inodes[1]].x),
-                    // Right boundary
-                    [1.0, 0.0] => (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y),
-                    // Left boundary
-                    [-1.0, 0.0] => (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y),
+                let (coord0, coord1) = match bnd.position {
+                    BoundaryPosition::Lower => {
+                        (mesh.nodes[edge.inodes[0]].x, mesh.nodes[edge.inodes[1]].x)
+                    }
+                    BoundaryPosition::Right => {
+                        (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y)
+                    }
+                    BoundaryPosition::Left => {
+                        (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y)
+                    }
                     _ => panic!("Invalid boundary normal"),
                 };
                 let bnd_values = compute_boundary_value_by_interpolation(
@@ -949,6 +1039,7 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                     coord0,
                     coord1,
                 );
+
                 let bnd_values_coord0_perturbed = compute_boundary_value_by_interpolation(
                     &nodal_coeffs,
                     self.basis().basis1d.n,
@@ -966,25 +1057,22 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                     coord1 + 1e-6,
                 );
                 let (dbnd_values_dx0, dbnd_values_dx1, dbnd_values_dy0, dbnd_values_dy1) =
-                    match bnd.normal {
-                        // Initial condition
-                        [0.0, -1.0] => (
+                    match bnd.position {
+                        BoundaryPosition::Lower => (
                             (&bnd_values_coord0_perturbed - &bnd_values) / 1e-6,
                             (&bnd_values_coord1_perturbed - &bnd_values) / 1e-6,
-                            Array1::zeros(self.basis().basis1d.n),
-                            Array1::zeros(self.basis().basis1d.n),
+                            Array1::zeros(basis.basis1d.n + 1),
+                            Array1::zeros(basis.basis1d.n + 1),
                         ),
-                        // Right boundary
-                        [1.0, 0.0] => (
-                            Array1::zeros(self.basis().basis1d.n),
-                            Array1::zeros(self.basis().basis1d.n),
+                        BoundaryPosition::Right => (
+                            Array1::zeros(basis.basis1d.n + 1),
+                            Array1::zeros(basis.basis1d.n + 1),
                             (&bnd_values_coord0_perturbed - &bnd_values) / 1e-6,
                             (&bnd_values_coord1_perturbed - &bnd_values) / 1e-6,
                         ),
-                        // Left boundary
-                        [-1.0, 0.0] => (
-                            Array1::zeros(self.basis().basis1d.n),
-                            Array1::zeros(self.basis().basis1d.n),
+                        BoundaryPosition::Left => (
+                            Array1::zeros(basis.basis1d.n + 1),
+                            Array1::zeros(basis.basis1d.n + 1),
                             (&bnd_values_coord0_perturbed - &bnd_values) / 1e-6,
                             (&bnd_values_coord1_perturbed - &bnd_values) / 1e-6,
                         ),
@@ -1074,104 +1162,16 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                 }
             }
         }
-        /*
-        // flow in boundary
-        for ibnd in self.mesh().flow_in_bnds.iter() {
-            let iedges = &ibnd.iedges;
-            let value = ibnd.value;
-            for &iedge in iedges.iter() {
-                let edge = &self.mesh().edges[iedge];
+        // Open boundaries
+        for bnd in &mesh.open_bnds {
+            let iedges = &bnd.iedges;
+            for &iedge in iedges {
+                let edge = &mesh.edges[iedge];
                 let ielem = edge.parents[0];
-                let elem = &self.mesh().elements[ielem];
+                let elem = &mesh.elements[ielem];
                 let inodes = &elem.inodes;
-                let x_slice: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[inodes[i]].x);
-                let y_slice: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[inodes[i]].y);
-                let nodes_along_edges = &basis.nodes_along_edges;
-                let local_ids = &edge.local_ids;
-                let ref_normal = Self::compute_ref_normal(local_ids[0]);
-                let edge_length = Self::compute_ref_edge_length(local_ids[0]);
-                let xi_slice = basis.r.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                let eta_slice = basis.s.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                for i in 0..nedge_basis {
-                    let xi = xi_slice[i];
-                    let eta = eta_slice[i];
-                    let (boundary_flux, _dflux_dbnd, dflux_dx0, dflux_dx1, dflux_dy0, dflux_dy1): (
-                        f64,
-                        f64,
-                        f64,
-                        f64,
-                        f64,
-                        f64,
-                    ) = self.dbnd_flux(
-                        value,
-                        x_slice[local_ids[0]],
-                        x_slice[(local_ids[0] + 1) % 3],
-                        y_slice[local_ids[0]],
-                        y_slice[(local_ids[0] + 1) % 3],
-                        1.0,
-                    );
-                    let mut dflux_dx = [0.0; 3];
-                    let mut dflux_dy = [0.0; 3];
-                    dflux_dx[local_ids[0]] = dflux_dx0;
-                    dflux_dx[(local_ids[0] + 1) % 3] = dflux_dx1;
-                    dflux_dy[local_ids[0]] = dflux_dy0;
-                    dflux_dy[(local_ids[0] + 1) % 3] = dflux_dy1;
-
-                    let mut dscaling_dx = [0.0; 3];
-                    let mut dscaling_dy = [0.0; 3];
-                    let scaling: f64 = self.dscaling(
-                        xi,
-                        eta,
-                        ref_normal,
-                        &x_slice,
-                        dscaling_dx.as_mut_slice(),
-                        &y_slice,
-                        dscaling_dy.as_mut_slice(),
-                        1.0,
-                    );
-                    let transformed_flux = boundary_flux * scaling;
-
-                    let dtransformed_flux_dx = &(&ArrayView1::from(&dflux_dx) * scaling)
-                        + &(&ArrayView1::from(&dscaling_dx) * boundary_flux);
-                    let dtransformed_flux_dy = &(&ArrayView1::from(&dflux_dy) * scaling)
-                        + &(&ArrayView1::from(&dscaling_dy) * boundary_flux);
-
-                    let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
-                    residuals[(ielem, itest_func)] +=
-                        0.5 * edge_length * edge_weights[i] * transformed_flux;
-
-                    let row_idx = ielem * ncell_basis + itest_func;
-                    for j in 0..3 {
-                        dx[(row_idx, inodes[j])] +=
-                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_dx[j];
-                        dy[(row_idx, inodes[j])] +=
-                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_dy[j];
-                    }
-                }
-            }
-        }
-        // flow out boundary
-        for ibnd in self.mesh().flow_out_bnds.iter() {
-            let iedges = &ibnd.iedges;
-            for &iedge in iedges.iter() {
-                let edge = &self.mesh().edges[iedge];
-                let ielem = edge.parents[0];
-                let elem = &self.mesh().elements[ielem];
-                let inodes = &elem.inodes;
-                let x_slice: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[inodes[i]].x);
-                let y_slice: [f64; 3] = std::array::from_fn(|i| self.mesh().nodes[inodes[i]].y);
+                let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
+                let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
                 let sol_nodes_along_edges = &self.basis().nodes_along_edges;
                 let nodes_along_edges = &basis.nodes_along_edges;
                 let local_ids = &edge.local_ids;
@@ -1206,8 +1206,10 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         .unwrap(),
                 );
                 for i in 0..nedge_basis {
+                    let u = sol_slice[i];
                     let xi = xi_slice[i];
                     let eta = eta_slice[i];
+
                     let (boundary_flux, dflux_du, dflux_dx0, dflux_dx1, dflux_dy0, dflux_dy1): (
                         f64,
                         f64,
@@ -1215,14 +1217,15 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         f64,
                         f64,
                         f64,
-                    ) = self.dbnd_flux(
-                        sol_slice[i],
+                    ) = self.dopen_bnd_flux(
+                        u,
                         x_slice[local_ids[0]],
                         x_slice[(local_ids[0] + 1) % 3],
                         y_slice[local_ids[0]],
                         y_slice[(local_ids[0] + 1) % 3],
                         1.0,
                     );
+
                     let mut dflux_dx = [0.0; 3];
                     let mut dflux_dy = [0.0; 3];
                     dflux_dx[local_ids[0]] = dflux_dx0;
@@ -1251,7 +1254,10 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         + &(&ArrayView1::from(&dscaling_dy) * boundary_flux);
 
                     let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
-
+                    if ielem == 1 {
+                        println!("boundary_flux: {:?}", boundary_flux);
+                        println!("transformed_flux: {:?}", transformed_flux);
+                    }
                     residuals[(ielem, itest_func)] +=
                         0.5 * edge_length * edge_weights[i] * transformed_flux;
 
@@ -1284,7 +1290,6 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                 }
             }
         }
-        */
     }
     fn volume_integral(
         &self,
@@ -1347,6 +1352,37 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
         d_y: &mut [f64],
         d_retval: f64,
     ) -> f64;
+    fn compute_open_boundary_flux(&self, u: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64;
+    fn dopen_bnd_flux(
+        &self,
+        u: f64,
+        x0: f64,
+        x1: f64,
+        y0: f64,
+        y1: f64,
+        d_retval: f64,
+    ) -> (f64, f64, f64, f64, f64, f64);
+    fn compute_interior_flux(
+        &self,
+        xi: f64,
+        eta: f64,
+        ref_normal: [f64; 2],
+        u: f64,
+        x: &[f64],
+        y: &[f64],
+    ) -> f64;
+    fn dinterior_flux(
+        &self,
+        xi: f64,
+        eta: f64,
+        ref_normal: [f64; 2],
+        u: f64,
+        x: &[f64],
+        d_x: &mut [f64],
+        y: &[f64],
+        d_y: &mut [f64],
+        d_retval: f64,
+    ) -> (f64, f64);
     fn physical_flux(&self, u: f64) -> [f64; 2];
     fn initialize_solution(&self, solutions: ArrayViewMut2<f64>);
     fn set_initial_solution(
@@ -1497,8 +1533,13 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
         let enriched_ncell_basis = self.enriched_basis().r.len();
         let epsilon1 = 1e-10;
         let epsilon2 = 1e-12;
+        let mut gamma_k = 1e-2; // regularization parameter for hessian_xx
+        let gamma_min = 1e-8;
+        let k1 = 1e-2;
+        let k2 = 1e-1;
+        let sigma: f64 = 0.5;
         let max_line_search_iter = 20;
-        let max_sqp_iter = 30;
+        let max_sqp_iter = 20;
         // let free_coords = &self.mesh.free_coords;
         // println!("free_coords: {:?}", free_coords);
         let (_old_to_new, new_to_old) = mesh.rearrange_node_dofs();
@@ -1526,12 +1567,14 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
             enriched_dsol.fill(0.0);
             enriched_dx.fill(0.0);
             enriched_dy.fill(0.0);
+
             println!("Solutions:");
             for row in solutions.rows() {
                 let row_str: Vec<String> = row.iter().map(|&val| format!("{:.4}", val)).collect();
                 println!("[{}]", row_str.join(", "));
             }
             mesh.print_free_node_coords();
+
             self.compute_residuals_and_derivatives(
                 mesh,
                 solutions.view(),
@@ -1550,6 +1593,36 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
                 enriched_dy.view_mut(),
                 true,
             );
+            /*
+            {
+                let mut perturbed_solutions = solutions.to_owned();
+                perturbed_solutions[(0, 1)] += 1e-6;
+                let mut perturbed_residuals = Array2::<f64>::zeros((nelem, enriched_ncell_basis));
+                self.compute_residuals(
+                    mesh,
+                    perturbed_solutions.view(),
+                    perturbed_residuals.view_mut(),
+                    true,
+                );
+                let dres_dsol = (&perturbed_residuals - &enriched_residuals) / 1e-6;
+                println!("dres_dsol by FD: {:?}", dres_dsol);
+                println!("dsol: {:?}", enriched_dsol.slice(s![.., 1]));
+            }
+            {
+                let mut perturbed_mesh = mesh.clone();
+                perturbed_mesh.nodes[1].x += 1e-6;
+                let mut perturbed_residuals = Array2::<f64>::zeros((nelem, enriched_ncell_basis));
+                self.compute_residuals(
+                    &perturbed_mesh,
+                    solutions.view(),
+                    perturbed_residuals.view_mut(),
+                    true,
+                );
+                let dres_dx = (&perturbed_residuals - &enriched_residuals) / 1e-6;
+                println!("dres_dx by FD: {:?}", dres_dx);
+                println!("enriched_dx: {:?}", enriched_dx.slice(s![.., 1]));
+            }
+            */
             let dcoord = concatenate(Axis(1), &[dx.view(), dy.view()]).unwrap();
             let dobj_dsol = enriched_dsol.t().dot(&enriched_residuals.flatten());
             let enriched_dcoord =
@@ -1587,7 +1660,8 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
                 .dot(&node_constraints)
                 .t()
                 .dot(&enriched_dcoord.dot(&node_constraints));
-            hessian_xx += &(1e-5 * &Array2::eye(hessian_xx.shape()[0]));
+            println!("gamma_k: {:?}", gamma_k);
+            hessian_xx += &(gamma_k * &Array2::eye(hessian_xx.shape()[0]));
 
             let (delta_u, delta_x) = self.solve_linear_subproblem(
                 mesh,
@@ -1640,8 +1714,24 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
                     max_line_search_iter
                 );
             }
+
+            // update gamma_k
+            let delta_x_norm = delta_x.mapv(|x| x.powi(2)).sum().sqrt();
+            let gamma_k_bar = {
+                if delta_x_norm < k1 {
+                    1.0 / sigma * gamma_k
+                } else if delta_x_norm > k2 {
+                    sigma * gamma_k
+                } else {
+                    gamma_k
+                }
+            };
+            gamma_k = gamma_k_bar.max(gamma_min);
+
             solutions.scaled_add(alpha, &delta_u.to_shape(solutions.shape()).unwrap());
             mesh.update_node_coords(&new_to_old, alpha, delta_x.view());
+
+            mesh.collapse_small_elements(1e-12);
             iter += 1;
         }
         /*
@@ -1714,7 +1804,7 @@ pub fn compute_boundary_value_by_interpolation(
     x1: f64,
 ) -> Array1<f64> {
     let coord = xi.mapv(|x| x * (x1 - x0) + x0);
-    let coord_mapped = coord.mapv(|x| x * 2.0 - 1.0);
+    let coord_mapped = coord.mapv(|x| 2.0 * (x - x0) / (x1 - x0) - 1.0);
     let v = LobattoBasis::vandermonde1d(n, coord_mapped.view());
     let interp_matrix = v.dot(inv_vandermonde);
     let values = interp_matrix.dot(source_solution);

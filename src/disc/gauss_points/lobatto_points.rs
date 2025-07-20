@@ -1,5 +1,15 @@
 pub fn get_lobatto_points_interval(points_num: usize) -> (Vec<f64>, Vec<f64>) {
     let (gauss_points, gauss_weights) = match points_num {
+        1 => {
+            let points = vec![0.0];
+            let weights = vec![2.0];
+            (points, weights)
+        }
+        2 => {
+            let points = vec![-1.0, 1.0];
+            let weights = vec![1.0, 1.0];
+            (points, weights)
+        }
         3 => {
             let points = vec![-1.0, 0.0, 1.0];
             let weights = vec![1.0 / 3.0, 4.0 / 3.0, 1.0 / 3.0];

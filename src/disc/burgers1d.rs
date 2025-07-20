@@ -8,11 +8,16 @@ use super::mesh::{
     mesh1d::Mesh1d,
     mesh2d::{Mesh2d, TriangleElement},
 };
-use crate::disc::ader::{ADER1DScalarShockTracking, BoundaryDimension};
-use crate::disc::{SQP, SpaceTimeSolver1DScalar, geometric::Geometric1D};
+use crate::disc::{
+    SQP, SpaceTimeSolver1DScalar, boundary::scalar1d::PolynomialBoundary, geometric::Geometric1D,
+};
 use crate::disc::{
     ader::{ADER1DMatrices, ADER1DScalar},
     basis::lagrange1d::LobattoBasis,
+};
+use crate::disc::{
+    ader::{ADER1DScalarShockTracking, BoundaryDimension},
+    boundary::BoundaryPosition,
 };
 use crate::disc::{
     basis::{quadrilateral::QuadrilateralBasis, triangle::TriangleBasis},
@@ -129,8 +134,7 @@ impl<'a> Disc1dBurgers<'a> {
             let mut sub_solutions = Vec::<Array2<f64>>::new();
             let mut sub_meshes = Vec::<Mesh2d<TriangleElement>>::new();
             let mut is_troubled = Array1::from_elem(nelem, false);
-            is_troubled[8] = true;
-            let troubled_elems = vec![8];
+            is_troubled[4] = true;
             residuals.fill(0.0);
             let mut dt = self.compute_time_step(solutions.view());
             // let mut dt = 0.002;
@@ -153,7 +157,31 @@ impl<'a> Disc1dBurgers<'a> {
                             .assign(&self.local_space_time_predictor(sol_slice, x_slice, dt));
                     }
                     true => {
-                        let mut submesh = Mesh2d::create_tri_mesh(9);
+                        let inodes = &elem.inodes;
+                        let x_slice: [f64; 2] =
+                            std::array::from_fn(|i| self.mesh.nodes[inodes[i]].x);
+                        let sol_slice = solutions.slice(s![ielem, ..]);
+                        let local_predictor =
+                            self.local_space_time_predictor(sol_slice, x_slice, dt);
+                        println!("local_predictor: {:?}", local_predictor);
+
+                        let mut submesh = Mesh2d::create_tri_mesh(
+                            5,
+                            5,
+                            0.0,
+                            1.0,
+                            0.0,
+                            dt,
+                            self.solver_param.polynomial_order,
+                        );
+                        let submesh_bnd = &mut submesh.polynomial_bnds[0];
+                        let nodes_along_edges = &self.space_time_basis.nodes_along_edges;
+                        let lower_sol_slice = solutions.slice(s![ielem, ..]).select(
+                            Axis(0),
+                            nodes_along_edges.slice(s![0, ..]).as_slice().unwrap(),
+                        );
+                        println!("submesh_bnd.nodal_coeffs: {:?}", submesh_bnd.nodal_coeffs);
+                        submesh_bnd.nodal_coeffs.assign(&lower_sol_slice);
                         let mut local_solutions = Array2::<f64>::zeros((
                             submesh.elem_num,
                             self.shock_tracker.basis.r.len(),
@@ -171,6 +199,7 @@ impl<'a> Disc1dBurgers<'a> {
                     }
                 }
             }
+            panic!();
             for (ielem, elem) in self.mesh.elements.iter().enumerate() {
                 match is_troubled[ielem] {
                     false => {
@@ -251,17 +280,21 @@ impl<'a> Disc1dBurgers<'a> {
                                 .unwrap(),
                         );
 
-                        let right_sols_along_boundary =
-                            self.shock_tracker.get_solutions_along_boundary(
-                                submesh,
-                                &submesh.left_bnd.iedges,
-                                local_sols,
-                            );
+                        let submesh_bnd_idx = submesh
+                            .open_bnds
+                            .iter()
+                            .position(|b| b.position == BoundaryPosition::Left)
+                            .unwrap();
+                        let submesh_bnd = &submesh.open_bnds[submesh_bnd_idx];
+
+                        let right_sols_along_boundary = self
+                            .shock_tracker
+                            .get_solutions_along_boundary(submesh, &submesh_bnd.iedges, local_sols);
 
                         let right_sols = Self::l2_project_fine_to_coarse(
                             &right_sols_along_boundary,
                             submesh,
-                            &submesh.left_bnd.iedges,
+                            &submesh_bnd.iedges,
                             &self.time_basis,
                             &self.shock_tracker.basis.basis1d,
                             BoundaryDimension::Spatial,
@@ -277,11 +310,14 @@ impl<'a> Disc1dBurgers<'a> {
                             residuals[(ilelem, left_itest_func)] -=
                                 edge_weights[i] * left_transformed_flux;
                         }
-
-                        submesh
-                            .left_bnd
-                            .nodal_coeffs
-                            .assign(&left_lqh_slice.view().slice(s![..;-1]));
+                        let submesh_bnd_poly = PolynomialBoundary {
+                            inodes: submesh_bnd.inodes.clone(),
+                            iedges: submesh_bnd.iedges.clone(),
+                            nodal_coeffs: left_lqh_slice.view().slice(s![..;-1]).to_owned(),
+                            position: BoundaryPosition::Left,
+                        };
+                        submesh.polynomial_bnds.push(submesh_bnd_poly);
+                        submesh.open_bnds.remove(submesh_bnd_idx);
                     }
                     (true, false) => {
                         let troubled_index = map_ielem_to_itroubled[&ilelem];
@@ -302,17 +338,21 @@ impl<'a> Disc1dBurgers<'a> {
                                 .unwrap(),
                         );
 
-                        let left_sols_along_boundary =
-                            self.shock_tracker.get_solutions_along_boundary(
-                                submesh,
-                                &submesh.right_bnd.iedges,
-                                local_sols,
-                            );
+                        let submesh_bnd_idx = submesh
+                            .open_bnds
+                            .iter()
+                            .position(|b| b.position == BoundaryPosition::Right)
+                            .unwrap();
+                        let submesh_bnd = &submesh.open_bnds[submesh_bnd_idx];
+
+                        let left_sols_along_boundary = self
+                            .shock_tracker
+                            .get_solutions_along_boundary(submesh, &submesh_bnd.iedges, local_sols);
 
                         let left_sols = Self::l2_project_fine_to_coarse(
                             &left_sols_along_boundary,
                             submesh,
-                            &submesh.right_bnd.iedges,
+                            &submesh_bnd.iedges,
                             &self.time_basis,
                             &self.shock_tracker.basis.basis1d,
                             BoundaryDimension::Spatial,
@@ -329,10 +369,14 @@ impl<'a> Disc1dBurgers<'a> {
                                 edge_weights[i] * right_transformed_flux;
                         }
 
-                        submesh
-                            .right_bnd
-                            .nodal_coeffs
-                            .assign(&right_lqh_slice.view().slice(s![..;-1]));
+                        let submesh_bnd_poly = PolynomialBoundary {
+                            inodes: submesh_bnd.inodes.clone(),
+                            iedges: submesh_bnd.iedges.clone(),
+                            nodal_coeffs: right_lqh_slice.view().slice(s![..;-1]).to_owned(),
+                            position: BoundaryPosition::Right,
+                        };
+                        submesh.polynomial_bnds.push(submesh_bnd_poly);
+                        submesh.open_bnds.remove(submesh_bnd_idx);
                     }
                     (true, true) => {
                         todo!()
@@ -542,7 +586,7 @@ impl<'a> Disc1dBurgers<'a> {
     }
     pub fn initialize_solution(
         &self,
-        mut solutions: ArrayViewMut3<f64>,
+        mut solutions: ArrayViewMut2<f64>,
         init_func: &dyn Fn(f64) -> f64,
     ) {
         let ncell_gp = self.space_basis.xi.len();
@@ -554,7 +598,7 @@ impl<'a> Disc1dBurgers<'a> {
             for igp in 0..ncell_gp {
                 let xi = self.space_basis.xi[igp];
                 let x = x_left + xi * jacob_det;
-                solutions[(ielem, igp, 0)] = init_func(x);
+                solutions[(ielem, igp)] = init_func(x);
             }
         }
     }

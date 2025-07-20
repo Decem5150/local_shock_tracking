@@ -186,6 +186,55 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
             (transformed_normal[0].powi(2) + transformed_normal[1].powi(2)).sqrt();
         jacob_det * normal_magnitude
     }
+    #[autodiff_reverse(dopen_bnd_flux, Const, Active, Active, Active, Active, Active, Active)]
+    fn compute_open_boundary_flux(&self, u: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64 {
+        let normal = Self::compute_normal(x0, y0, x1, y1);
+        let nx = normal[0];
+        let nt = normal[1];
+
+        // Physical flux: F(u) = (0.5*u^2, u)
+        let flux_l = 0.5 * u * u * nx + u * nt;
+        let flux_r = 0.5 * u * u * nx + u * nt;
+
+        // Roe-averaged wave speed: beta = u_avg * nx + nt
+        let u_avg = 0.5 * (u + u);
+        let beta = u_avg * nx + nt;
+
+        // Smoothed absolute value: |x| approx x * tanh(k*x)
+        let abs_beta = beta * (100.0 * beta).tanh();
+
+        let result = 0.5 * (flux_l + flux_r + abs_beta * (u - u));
+        result
+    }
+    #[autodiff_reverse(
+        dinterior_flux,
+        Const,
+        Const,
+        Const,
+        Const,
+        Active,
+        Duplicated,
+        Duplicated,
+        Active
+    )]
+    fn compute_interior_flux(
+        &self,
+        xi: f64,
+        eta: f64,
+        ref_normal: [f64; 2],
+        u: f64,
+        x: &[f64],
+        y: &[f64],
+    ) -> f64 {
+        let f = self.physical_flux(u);
+        let (jacob_det, jacob_inv_t) = Self::evaluate_jacob(xi, eta, &x, &y);
+        let transformed_f = [
+            jacob_det * (f[0] * jacob_inv_t[0] + f[1] * jacob_inv_t[2]),
+            jacob_det * (f[0] * jacob_inv_t[1] + f[1] * jacob_inv_t[3]),
+        ];
+
+        transformed_f[0] * ref_normal[0] + transformed_f[1] * ref_normal[1]
+    }
     fn physical_flux(&self, u: f64) -> [f64; 2] {
         [0.5 * u * u, u]
     }
@@ -201,7 +250,7 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
         solutions.slice_mut(s![6, ..]).fill(5.0);
         solutions.slice_mut(s![7, ..]).fill(5.0);
         */
-        solutions.fill(1.0);
+        solutions.fill(0.0);
     }
 }
 impl P0Solver for Disc1dBurgers1dSpaceTime<'_> {

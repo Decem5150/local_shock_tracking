@@ -1,21 +1,9 @@
-use crate::disc::{
-    SQP, SpaceTimeSolver1DScalar,
-    advection1d_space_time_tri::Disc1dAdvectionSpaceTimeTri,
-    basis::{lagrange1d::LobattoBasis, quadrilateral::QuadrilateralBasis, triangle::TriangleBasis},
-    burgers1d::Disc1dBurgers,
-    burgers1d_space_time::Disc1dBurgers1dSpaceTime,
-    mesh::{
-        mesh1d::Mesh1d,
-        mesh2d::{Mesh2d, QuadrilateralElement, TriangleElement},
-    },
-};
-use ndarray::{Array, Array3, Ix2};
-
 pub struct SolverParameters {
     pub cfl: f64,
     pub final_time: f64,
     pub final_step: usize,
     pub polynomial_order: usize,
+    pub shock_tracking_order: usize,
     pub equation_num: usize,
 }
 pub struct ShockTrackingParameters {

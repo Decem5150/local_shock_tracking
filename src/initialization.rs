@@ -1,14 +1,7 @@
-use ndarray::Array3;
-
 use crate::{
     disc::{
-        advection1d_space_time_tri::Disc1dAdvectionSpaceTimeTri,
-        basis::triangle::TriangleBasis,
-        burgers1d_space_time::Disc1dBurgers1dSpaceTime,
-        mesh::{
-            mesh1d::Mesh1d,
-            mesh2d::{Mesh2d, QuadrilateralElement, TriangleElement},
-        },
+        // advection1d_space_time_tri::Disc1dAdvectionSpaceTimeTri,
+        mesh::mesh1d::Mesh1d,
     },
     io::params_parser::SolverParamParser,
     solver::SolverParameters,
@@ -16,12 +9,12 @@ use crate::{
 
 pub fn initialize_params_by_file(file_path: &str) -> SolverParameters {
     let solver_param_parser = SolverParamParser::parse(file_path);
-    let polynomial_order = solver_param_parser.polynomial_order;
     let solver_params = SolverParameters {
         cfl: solver_param_parser.cfl,
         final_time: solver_param_parser.final_time,
         final_step: solver_param_parser.final_step,
-        polynomial_order,
+        polynomial_order: solver_param_parser.polynomial_order,
+        shock_tracking_order: solver_param_parser.shock_tracking_order,
         equation_num: 1,
     };
 
@@ -29,11 +22,13 @@ pub fn initialize_params_by_file(file_path: &str) -> SolverParameters {
 }
 pub fn initialize_params() -> SolverParameters {
     let polynomial_order = 2;
+    let shock_tracking_order = 2;
     let solver_params = SolverParameters {
         cfl: 1.0,
         final_time: 0.0,
         final_step: 10,
         polynomial_order,
+        shock_tracking_order,
         equation_num: 1,
     };
     solver_params

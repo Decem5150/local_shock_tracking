@@ -246,6 +246,16 @@ impl<'a> SpaceTimeSolver1DScalar for Disc1dAdvectionSpaceTimeTri<'a> {
             (transformed_normal[0].powi(2) + transformed_normal[1].powi(2)).sqrt();
         jacob_det * normal_magnitude
     }
+    fn compute_interior_flux(
+        &self,
+        xi: f64,
+        eta: f64,
+        ref_normal: [f64; 2],
+        u: f64,
+        x: &[f64],
+        y: &[f64],
+    ) -> f64 {
+    }
     fn physical_flux(&self, u: f64) -> [f64; 2] {
         let advection_speed = self.advection_speed;
         [advection_speed * u, u]

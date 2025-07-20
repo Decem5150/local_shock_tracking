@@ -1,5 +1,6 @@
 {
-    "polynomial_order": 2,
+    "polynomial_order": 3,
+    "shock_tracking_order": 2,
     "cfl": 0.5,
     "final_time": 0.03,
     "final_step": 1

@@ -1047,6 +1047,14 @@ impl Basis for TriangleBasis {
         r: ArrayView1<f64>,
         s: ArrayView1<f64>,
     ) -> (Array2<f64>, Array2<f64>) {
+        if n == 0 {
+            let num_points = r.len();
+            return (
+                Array2::zeros((num_points, 1)),
+                Array2::zeros((num_points, 1)),
+            );
+        }
+
         let mut v2dr = Array2::<f64>::zeros((r.len(), (n + 1) * (n + 2) / 2));
         let mut v2ds = Array2::<f64>::zeros((r.len(), (n + 1) * (n + 2) / 2));
         let (a, b) = Self::rs_to_ab(r, s);
@@ -1063,6 +1071,10 @@ impl Basis for TriangleBasis {
         (v2dr, v2ds)
     }
     fn nodes2d(n: usize) -> (Array1<f64>, Array1<f64>) {
+        if n == 0 {
+            return (array![0.0], array![0.0]);
+        }
+
         let alpopt = [
             0.0000, 0.0000, 1.4152, 0.1001, 0.2751, 0.9800, 1.0999, 1.2832, 1.3648, 1.4773, 1.4959,
             1.5743, 1.5770, 1.6223, 1.6258,
