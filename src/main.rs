@@ -47,11 +47,13 @@ fn main() {
     let basis = TriangleBasis::new(solver_params.polynomial_order);
     let enriched_basis = TriangleBasis::new(solver_params.polynomial_order + 1);
     let mut mesh =
-        Mesh2d::create_tri_mesh(3, 3, 0.0, 1.0, 0.0, 1.0, solver_params.polynomial_order);
-    mesh.nodes[1].x = 0.03;
+        Mesh2d::create_tri_mesh(4, 3, 0.0, 1.2, 0.0, 1.0, solver_params.polynomial_order);
+    mesh.nodes[6].as_mut().x = 0.41;
+    dbg!(&mesh.nodes[6]);
     mesh.print_free_node_coords();
     mesh.collapse_small_elements(0.1);
     mesh.print_free_node_coords();
+    dbg!(&mesh.nodes[6]);
     /*
     let disc = Disc1dBurgers1dSpaceTime::new(basis, enriched_basis, &solver_params);
     let mut solutions = Array2::<f64>::zeros((mesh.elem_num, disc.basis.r.len()));

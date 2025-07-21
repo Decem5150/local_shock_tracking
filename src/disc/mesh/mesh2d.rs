@@ -8,6 +8,37 @@ use hashbrown::{HashMap, HashSet};
 use ndarray::{Array1, ArrayView1, array};
 
 #[derive(Clone, Debug)]
+pub enum Status<T> {
+    Active(T),
+    Removed,
+}
+impl<T> Status<T> {
+    pub fn into_inner(self) -> T {
+        match self {
+            Status::Active(v) => v,
+            Status::Removed => unreachable!(),
+        }
+    }
+
+    pub fn as_ref(&self) -> &T {
+        match self {
+            Status::Active(v) => v,
+            Status::Removed => unreachable!(),
+        }
+    }
+
+    pub fn as_mut(&mut self) -> &mut T {
+        match self {
+            Status::Active(v) => v,
+            Status::Removed => unreachable!(),
+        }
+    }
+
+    pub fn mark_as_removed(&mut self) {
+        *self = Status::Removed;
+    }
+}
+#[derive(Clone, Debug)]
 pub struct FlowInBoundary {
     pub iedges: Vec<usize>,
     pub value: f64,
@@ -16,7 +47,7 @@ pub struct FlowInBoundary {
 pub struct FlowOutBoundary {
     pub iedges: Vec<usize>,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Edge {
     pub inodes: Vec<usize>,
     pub parents: Vec<usize>,
@@ -127,9 +158,9 @@ pub struct SubMesh2d {
 */
 #[derive(Clone)]
 pub struct Mesh2d<T: Element2d> {
-    pub nodes: Vec<Node>,
-    pub edges: Vec<Edge>,
-    pub elements: Vec<T>,
+    pub nodes: Vec<Status<Node>>,
+    pub edges: Vec<Status<Edge>>,
+    pub elements: Vec<Status<T>>,
     pub constant_bnds: Vec<ConstantBoundary>,
     pub polynomial_bnds: Vec<PolynomialBoundary>,
     pub open_bnds: Vec<OpenBoundary>,
@@ -154,11 +185,15 @@ impl<T: Element2d> Mesh2d<T> {
             if old_dof_idx < n_nodes {
                 // This is an X-DOF
                 let node_idx = old_dof_idx;
-                self.nodes[node_idx].x += alpha * delta_val;
+                if let Status::Active(node) = &mut self.nodes[node_idx] {
+                    node.x += alpha * delta_val;
+                }
             } else {
                 // This is a Y-DOF
                 let node_idx = old_dof_idx - n_nodes;
-                self.nodes[node_idx].y += alpha * delta_val;
+                if let Status::Active(node) = &mut self.nodes[node_idx] {
+                    node.y += alpha * delta_val;
+                }
             }
         }
     }
@@ -234,29 +269,30 @@ impl<T: Element2d> Mesh2d<T> {
         println!("--- Free Node Coordinates ---");
 
         for &node_idx in free_nodes.iter() {
-            let node = &self.nodes[node_idx];
-            let is_interior = self.interior_nodes.contains(&node_idx);
-            let free_x = is_interior || self.free_bnd_x.contains(&node_idx);
-            let free_y = is_interior || self.free_bnd_y.contains(&node_idx);
+            if let Status::Active(node) = &self.nodes[node_idx] {
+                let is_interior = self.interior_nodes.contains(&node_idx);
+                let free_x = is_interior || self.free_bnd_x.contains(&node_idx);
+                let free_y = is_interior || self.free_bnd_y.contains(&node_idx);
 
-            let mut dof_str = Vec::new();
-            if free_x {
-                dof_str.push("X");
-            }
-            if free_y {
-                dof_str.push("Y");
+                let mut dof_str = Vec::new();
+                if free_x {
+                    dof_str.push("X");
+                }
+                if free_y {
+                    dof_str.push("Y");
+                }
+
+                println!(
+                    "Node {}: ({:.4}, {:.4}) -> Free DOFs: {}",
+                    node_idx,
+                    node.x,
+                    node.y,
+                    dof_str.join(", ")
+                );
             }
 
-            println!(
-                "Node {}: ({:.4}, {:.4}) -> Free DOFs: {}",
-                node_idx,
-                node.x,
-                node.y,
-                dof_str.join(", ")
-            );
+            println!("-----------------------------");
         }
-
-        println!("-----------------------------");
     }
 }
 /*
@@ -384,146 +420,146 @@ impl Mesh2d<QuadrilateralElement> {
 impl Mesh2d<TriangleElement> {
     pub fn create_eight_tri_mesh() -> Mesh2d<TriangleElement> {
         let nodes = vec![
-            Node {
+            Status::Active(Node {
                 x: 0.0,
                 y: 0.0,
                 parents: vec![0, 1],
                 local_ids: vec![0, 0],
-            },
-            Node {
+            }),
+            Status::Active(Node {
                 x: 0.5,
                 y: 0.0,
                 parents: vec![0, 2, 3],
                 local_ids: vec![1, 0, 0],
-            },
-            Node {
+            }),
+            Status::Active(Node {
                 x: 1.0,
                 y: 0.0,
                 parents: vec![2],
                 local_ids: vec![1],
-            },
-            Node {
+            }),
+            Status::Active(Node {
                 x: 0.0,
                 y: 0.5,
                 parents: vec![1, 4, 5],
                 local_ids: vec![2, 0, 0],
-            },
-            Node {
+            }),
+            Status::Active(Node {
                 x: 0.5,
                 y: 0.5,
                 parents: vec![0, 1, 3, 4, 6, 7],
                 local_ids: vec![2, 1, 2, 1, 0, 0],
-            },
-            Node {
+            }),
+            Status::Active(Node {
                 x: 1.0,
                 y: 0.5,
                 parents: vec![2, 3, 6],
                 local_ids: vec![2, 1, 1],
-            },
-            Node {
+            }),
+            Status::Active(Node {
                 x: 0.0,
                 y: 1.0,
                 parents: vec![5],
                 local_ids: vec![2],
-            },
-            Node {
+            }),
+            Status::Active(Node {
                 x: 0.5,
                 y: 1.0,
                 parents: vec![4, 5, 7],
                 local_ids: vec![2, 1, 2],
-            },
-            Node {
+            }),
+            Status::Active(Node {
                 x: 1.0,
                 y: 1.0,
                 parents: vec![6, 7],
                 local_ids: vec![2, 1],
-            },
+            }),
         ];
 
         let edges = vec![
             // Horizontal edges
-            Edge {
+            Status::Active(Edge {
                 inodes: vec![0, 1],
                 parents: vec![0],
                 local_ids: vec![0],
-            }, // 0
-            Edge {
+            }), // 0
+            Status::Active(Edge {
                 inodes: vec![1, 2],
                 parents: vec![2],
                 local_ids: vec![0],
-            }, // 1
-            Edge {
+            }), // 1
+            Status::Active(Edge {
                 inodes: vec![4, 3],
                 parents: vec![1, 4],
                 local_ids: vec![1, 0],
-            }, // 2
-            Edge {
+            }), // 2
+            Status::Active(Edge {
                 inodes: vec![5, 4],
                 parents: vec![3, 6],
                 local_ids: vec![1, 0],
-            }, // 3
-            Edge {
+            }), // 3
+            Status::Active(Edge {
                 inodes: vec![7, 6],
                 parents: vec![5],
                 local_ids: vec![1],
-            }, // 4
-            Edge {
+            }), // 4
+            Status::Active(Edge {
                 inodes: vec![8, 7],
                 parents: vec![7],
                 local_ids: vec![1],
-            }, // 5
+            }), // 5
             // Vertical edges
-            Edge {
+            Status::Active(Edge {
                 inodes: vec![3, 0],
                 parents: vec![1],
                 local_ids: vec![2],
-            }, // 6
-            Edge {
+            }), // 6
+            Status::Active(Edge {
                 inodes: vec![1, 4],
                 parents: vec![0, 3],
                 local_ids: vec![1, 2],
-            }, // 7
-            Edge {
+            }), // 7
+            Status::Active(Edge {
                 inodes: vec![2, 5],
                 parents: vec![2],
                 local_ids: vec![1],
-            }, // 8
-            Edge {
+            }), // 8
+            Status::Active(Edge {
                 inodes: vec![6, 3],
                 parents: vec![5],
                 local_ids: vec![2],
-            }, // 9
-            Edge {
+            }), // 9
+            Status::Active(Edge {
                 inodes: vec![4, 7],
                 parents: vec![4, 7],
                 local_ids: vec![1, 2],
-            }, // 10
-            Edge {
+            }), // 10
+            Status::Active(Edge {
                 inodes: vec![5, 8],
                 parents: vec![6],
                 local_ids: vec![1],
-            }, // 11
+            }), // 11
             // Diagonal edges
-            Edge {
+            Status::Active(Edge {
                 inodes: vec![4, 0],
                 parents: vec![0, 1],
                 local_ids: vec![2, 0],
-            }, // 12
-            Edge {
+            }), // 12
+            Status::Active(Edge {
                 inodes: vec![5, 1],
                 parents: vec![2, 3],
                 local_ids: vec![2, 0],
-            }, // 13
-            Edge {
+            }), // 13
+            Status::Active(Edge {
                 inodes: vec![7, 3],
                 parents: vec![4, 5],
                 local_ids: vec![2, 0],
-            }, // 14
-            Edge {
+            }), // 14
+            Status::Active(Edge {
                 inodes: vec![8, 4],
                 parents: vec![6, 7],
                 local_ids: vec![2, 0],
-            }, // 15
+            }), // 15
         ];
 
         let constant_bnds = vec![
@@ -561,55 +597,55 @@ impl Mesh2d<TriangleElement> {
 
         let interior_edges = vec![2, 3, 7, 10, 12, 13, 14, 15];
 
-        let elements: Vec<TriangleElement> = vec![
-            TriangleElement {
+        let elements = vec![
+            Status::Active(TriangleElement {
                 inodes: [0, 1, 4],
                 iedges: [0, 7, 12],
                 ineighbors: vec![3, 1],
                 original_area: 0.125,
-            },
-            TriangleElement {
+            }),
+            Status::Active(TriangleElement {
                 inodes: [0, 4, 3],
                 iedges: [12, 2, 6],
                 ineighbors: vec![0, 4],
                 original_area: 0.125,
-            },
-            TriangleElement {
+            }),
+            Status::Active(TriangleElement {
                 inodes: [1, 2, 5],
                 iedges: [1, 8, 13],
                 ineighbors: vec![3],
                 original_area: 0.125,
-            },
-            TriangleElement {
+            }),
+            Status::Active(TriangleElement {
                 inodes: [1, 5, 4],
                 iedges: [13, 3, 7],
                 ineighbors: vec![2, 6, 0],
                 original_area: 0.125,
-            },
-            TriangleElement {
+            }),
+            Status::Active(TriangleElement {
                 inodes: [3, 4, 7],
                 iedges: [2, 10, 14],
                 ineighbors: vec![1, 7, 5],
                 original_area: 0.125,
-            },
-            TriangleElement {
+            }),
+            Status::Active(TriangleElement {
                 inodes: [3, 7, 6],
                 iedges: [14, 4, 9],
                 ineighbors: vec![4],
                 original_area: 0.125,
-            },
-            TriangleElement {
+            }),
+            Status::Active(TriangleElement {
                 inodes: [4, 5, 8],
                 iedges: [3, 11, 15],
                 ineighbors: vec![3, 7],
                 original_area: 0.125,
-            },
-            TriangleElement {
+            }),
+            Status::Active(TriangleElement {
                 inodes: [4, 8, 7],
                 iedges: [15, 5, 10],
                 ineighbors: vec![6, 4],
                 original_area: 0.125,
-            },
+            }),
         ];
         let free_bnd_x = vec![7];
         let free_bnd_y = vec![3, 5];
@@ -646,12 +682,12 @@ impl Mesh2d<TriangleElement> {
 
         for i in 0..y_num {
             for j in 0..x_num {
-                nodes.push(Node {
+                nodes.push(Status::Active(Node {
                     x: x0 + j as f64 * hx,
                     y: y0 + i as f64 * hy,
                     parents: Vec::new(),
                     local_ids: Vec::new(),
-                });
+                }));
             }
         }
 
@@ -667,86 +703,79 @@ impl Mesh2d<TriangleElement> {
                 let tl = (i + 1) * x_num + j;
                 let tr = (i + 1) * x_num + j + 1;
 
-                let p_bl = &nodes[bl];
-                let p_br = &nodes[br];
-                let p_tl = &nodes[tl];
-                let p_tr = &nodes[tr];
+                let p_bl = nodes[bl].as_ref();
+                let p_br = nodes[br].as_ref();
+                let p_tl = nodes[tl].as_ref();
+                let p_tr = nodes[tr].as_ref();
 
                 let area1 = 0.5
                     * ((p_br.x - p_bl.x) * (p_tr.y - p_bl.y)
                         - (p_tr.x - p_bl.x) * (p_br.y - p_bl.y));
-                elements.push(TriangleElement {
+                elements.push(Status::Active(TriangleElement {
                     inodes: [bl, br, tr],
                     iedges: [0; 3],
                     ineighbors: vec![],
-                    original_area: area1.abs(),
-                });
+                    original_area: area1,
+                }));
 
                 let area2 = 0.5
                     * ((p_tr.x - p_bl.x) * (p_tl.y - p_bl.y)
                         - (p_tl.x - p_bl.x) * (p_tr.y - p_bl.y));
-                elements.push(TriangleElement {
+                elements.push(Status::Active(TriangleElement {
                     inodes: [bl, tr, tl],
                     iedges: [0; 3],
                     ineighbors: vec![],
-                    original_area: area2.abs(),
-                });
+                    original_area: area2,
+                }));
             }
         }
 
         for (elem_idx, element) in elements.iter().enumerate() {
-            for (local_id, &inode) in element.inodes.iter().enumerate() {
-                nodes[inode].parents.push(elem_idx);
-                nodes[inode].local_ids.push(local_id);
+            for (local_id, &inode) in element.as_ref().inodes.iter().enumerate() {
+                nodes[inode].as_mut().parents.push(elem_idx);
+                nodes[inode].as_mut().local_ids.push(local_id);
             }
         }
 
         let mut edges = Vec::new();
         let mut edge_map = std::collections::HashMap::new();
         for (elem_idx, element) in elements.iter_mut().enumerate() {
-            let n = element.inodes;
+            let n = element.as_ref().inodes;
             let element_edges_nodes = [(n[0], n[1]), (n[1], n[2]), (n[2], n[0])];
 
             for (local_id, &(n1, n2)) in element_edges_nodes.iter().enumerate() {
                 let key = (n1.min(n2), n1.max(n2));
                 let edge_idx = *edge_map.entry(key).or_insert_with(|| {
                     let new_edge_idx = edges.len();
-                    edges.push(Edge {
+                    edges.push(Status::Active(Edge {
                         inodes: vec![n1, n2],
                         parents: Vec::new(),
                         local_ids: Vec::new(),
-                    });
+                    }));
                     new_edge_idx
                 });
 
-                element.iedges[local_id] = edge_idx;
+                element.as_mut().iedges[local_id] = edge_idx;
 
-                edges[edge_idx].parents.push(elem_idx);
-                edges[edge_idx].local_ids.push(local_id);
-            }
-        }
-
-        for (elem_idx, element) in elements.iter().enumerate() {
-            for (local_id, &inode) in element.inodes.iter().enumerate() {
-                nodes[inode].parents.push(elem_idx);
-                nodes[inode].local_ids.push(local_id);
+                edges[edge_idx].as_mut().parents.push(elem_idx);
+                edges[edge_idx].as_mut().local_ids.push(local_id);
             }
         }
 
         for (elem_idx, element) in elements.clone().iter().enumerate() {
             let mut neighbors = Vec::new();
-            for &iedge in &element.iedges {
-                for &parent_elem in &edges[iedge].parents {
+            for &iedge in &element.as_ref().iedges {
+                for &parent_elem in &edges[iedge].as_ref().parents {
                     if parent_elem != elem_idx {
                         neighbors.push(parent_elem);
                     }
                 }
             }
-            elements[elem_idx].ineighbors = neighbors;
+            elements[elem_idx].as_mut().ineighbors = neighbors;
         }
 
         let interior_edges: Vec<usize> = (0..edges.len())
-            .filter(|&i| edges[i].parents.len() == 2)
+            .filter(|&i| edges[i].as_ref().parents.len() == 2)
             .collect();
 
         let mut top_edges = Vec::new();
@@ -903,8 +932,7 @@ impl Mesh2d<TriangleElement> {
             node_num,
         }
     }
-    pub fn collapse_small_elements(&mut self, min_area_ratio: f64) -> (Vec<usize>, Vec<usize>) {
-        let mut overall_remap: Vec<usize> = (0..self.elements.len()).collect();
+    pub fn collapse_small_elements(&mut self, min_area_ratio: f64) {
         let mut node_boundary_count: HashMap<usize, usize> = HashMap::new();
         let mut boundary_nodes = HashSet::new();
 
@@ -926,8 +954,6 @@ impl Mesh2d<TriangleElement> {
             .iter()
             .for_each(|b| count_node_on_boundary(&b.inodes));
 
-        let mut collapsed_nodes = HashSet::new();
-
         loop {
             let mut element_to_collapse = None;
             let mut first_small_element_found = None;
@@ -937,37 +963,32 @@ impl Mesh2d<TriangleElement> {
             // If none are found, we'll collapse the first "small" element we encounter.
             // This is done in a single pass to avoid re-scanning the element list.
             for (elem_idx, element) in self.elements.iter().enumerate() {
-                if element
-                    .inodes
-                    .iter()
-                    .any(|&inode| collapsed_nodes.contains(&inode))
-                {
-                    continue;
-                }
-                let p = [
-                    &self.nodes[element.inodes[0]],
-                    &self.nodes[element.inodes[1]],
-                    &self.nodes[element.inodes[2]],
-                ];
-                let area = 0.5
-                    * ((p[1].x - p[0].x) * (p[2].y - p[0].y)
-                        - (p[2].x - p[0].x) * (p[1].y - p[0].y));
+                if let Status::Active(element) = element {
+                    let p = [
+                        self.nodes[element.inodes[0]].as_ref(),
+                        self.nodes[element.inodes[1]].as_ref(),
+                        self.nodes[element.inodes[2]].as_ref(),
+                    ];
+                    let area = 0.5
+                        * ((p[1].x - p[0].x) * (p[2].y - p[0].y)
+                            - (p[2].x - p[0].x) * (p[1].y - p[0].y));
 
-                // A negative area indicates different winding order, but its magnitude is what matters.
-                if area <= 1e-12 {
-                    element_to_collapse = Some(elem_idx);
-                    break; // Found a degenerate element, collapse it immediately.
-                }
+                    // A negative area indicates different winding order, but its magnitude is what matters.
+                    if area <= 1e-12 {
+                        element_to_collapse = Some(elem_idx);
+                        break; // Found a degenerate element, collapse it immediately.
+                    }
 
-                // If no small element has been found yet, and this one qualifies, store it.
-                // We continue scanning in case we find a fully degenerate element later.
-                let area_ratio = if element.original_area > 1e-12 {
-                    area / element.original_area
-                } else {
-                    1.0 // Avoid division by zero; treat as no change.
-                };
-                if first_small_element_found.is_none() && area_ratio < min_area_ratio {
-                    first_small_element_found = Some(elem_idx);
+                    // If no small element has been found yet, and this one qualifies, store it.
+                    // We continue scanning in case we find a fully degenerate element later.
+                    let area_ratio = if element.original_area > 1e-12 {
+                        area / element.original_area
+                    } else {
+                        1.0 // Avoid division by zero; treat as no change.
+                    };
+                    if first_small_element_found.is_none() && area_ratio < min_area_ratio {
+                        first_small_element_found = Some(elem_idx);
+                    }
                 }
             }
 
@@ -978,12 +999,12 @@ impl Mesh2d<TriangleElement> {
 
             if let Some(elem_idx) = element_to_collapse {
                 // Determine which edge to collapse and how
-                let element = self.elements[elem_idx].clone();
+                let element = self.elements[elem_idx].as_ref();
                 let p_indices = element.inodes;
                 let p = [
-                    &self.nodes[p_indices[0]],
-                    &self.nodes[p_indices[1]],
-                    &self.nodes[p_indices[2]],
+                    self.nodes[p_indices[0]].as_ref(),
+                    self.nodes[p_indices[1]].as_ref(),
+                    self.nodes[p_indices[2]].as_ref(),
                 ];
 
                 // Find the shortest edge of the element. This is the edge we will collapse.
@@ -1027,11 +1048,13 @@ impl Mesh2d<TriangleElement> {
                         } else {
                             // Both are on the same number of boundaries (e.g., both on one line, or both corners).
                             // Collapse the shorter of the other two edges. This improves element quality.
-                            let p_other = &self.nodes[other_v_idx];
-                            let l_sq_1_other = (p[v1_idx].x - p_other.x).powi(2)
-                                + (p[v1_idx].y - p_other.y).powi(2);
-                            let l_sq_2_other = (p[v2_idx].x - p_other.x).powi(2)
-                                + (p[v2_idx].y - p_other.y).powi(2);
+                            let p_other = self.nodes[other_v_idx].as_ref();
+                            let p1 = self.nodes[v1_idx].as_ref();
+                            let p2 = self.nodes[v2_idx].as_ref();
+                            let l_sq_1_other =
+                                (p1.x - p_other.x).powi(2) + (p1.y - p_other.y).powi(2);
+                            let l_sq_2_other =
+                                (p2.x - p_other.x).powi(2) + (p2.y - p_other.y).powi(2);
                             if l_sq_1_other > l_sq_2_other {
                                 (v2_idx, v1_idx)
                             } else {
@@ -1042,11 +1065,11 @@ impl Mesh2d<TriangleElement> {
                     // Case 3: Both vertices are in the interior.
                     // Use the "collapse to longest opposite edge" heuristic to improve quality.
                     (false, false) => {
-                        let p_other = &self.nodes[other_v_idx];
-                        let l_sq_1_other =
-                            (p[v1_idx].x - p_other.x).powi(2) + (p[v1_idx].y - p_other.y).powi(2);
-                        let l_sq_2_other =
-                            (p[v2_idx].x - p_other.x).powi(2) + (p[v2_idx].y - p_other.y).powi(2);
+                        let p_other = self.nodes[other_v_idx].as_ref();
+                        let p1 = self.nodes[v1_idx].as_ref();
+                        let p2 = self.nodes[v2_idx].as_ref();
+                        let l_sq_1_other = (p1.x - p_other.x).powi(2) + (p1.y - p_other.y).powi(2);
+                        let l_sq_2_other = (p2.x - p_other.x).powi(2) + (p2.y - p_other.y).powi(2);
                         if l_sq_1_other > l_sq_2_other {
                             (v2_idx, v1_idx)
                         } else {
@@ -1055,46 +1078,29 @@ impl Mesh2d<TriangleElement> {
                     }
                 };
 
-                if collapsed_nodes.contains(&v_from_idx) || collapsed_nodes.contains(&v_to_idx) {
-                    continue;
-                }
-
                 // Perform the collapse and update tracking
-                let remap = self.perform_edge_collapse(v_from_idx, v_to_idx);
-                collapsed_nodes.insert(v_from_idx);
-
-                // Update the overall remapping from original element indices to final indices.
-                overall_remap = overall_remap
-                    .iter()
-                    .map(|&old_idx| {
-                        if old_idx == usize::MAX {
-                            usize::MAX
-                        } else {
-                            remap[old_idx]
-                        }
-                    })
-                    .collect();
+                self.perform_edge_collapse(v_from_idx, v_to_idx);
             } else {
                 break;
             }
         }
-        let mut kept_elements = Vec::new();
-        let mut removed_elements = Vec::new();
-        for (original_idx, &final_idx) in overall_remap.iter().enumerate() {
-            if final_idx == usize::MAX {
-                removed_elements.push(original_idx);
-            } else {
-                kept_elements.push(original_idx);
-            }
-        }
-
-        (kept_elements, removed_elements)
     }
-    fn perform_edge_collapse(&mut self, v_from_idx: usize, v_to_idx: usize) -> Vec<usize> {
-        // --- 0. Identify affected and collapsed elements ---
-        let parents_from: HashSet<usize> = self.nodes[v_from_idx].parents.iter().cloned().collect();
-        let parents_to: HashSet<usize> = self.nodes[v_to_idx].parents.iter().cloned().collect();
-
+    fn perform_edge_collapse(&mut self, v_from_idx: usize, v_to_idx: usize) {
+        // --- 1. Identify affected and collapsed elements ---
+        let parents_from: HashSet<usize> = self.nodes[v_from_idx]
+            .as_ref()
+            .parents
+            .iter()
+            .cloned()
+            .collect();
+        dbg!(&parents_from);
+        let parents_to: HashSet<usize> = self.nodes[v_to_idx]
+            .as_ref()
+            .parents
+            .iter()
+            .cloned()
+            .collect();
+        dbg!(&parents_to);
         let elements_to_remove: HashSet<usize> =
             parents_from.intersection(&parents_to).cloned().collect();
         let affected_elements: HashSet<usize> = parents_from
@@ -1102,15 +1108,16 @@ impl Mesh2d<TriangleElement> {
             .cloned()
             .collect();
 
-        // --- Find "from" and "to" edges that will be merged ---
+        // --- 2. Find "from" and "to" edges that will be merged ---
         let mut from_edges = Vec::new();
         let mut to_edges = Vec::new();
 
         let mut edges_to_merge: HashMap<usize, usize> = HashMap::new();
+        let mut edges_to_remove: HashSet<usize> = HashSet::new();
 
         for &elem_idx in &elements_to_remove {
             let element = &self.elements[elem_idx];
-            let inodes = element.inodes;
+            let inodes = element.as_ref().inodes;
             if let (Some(local_from), Some(local_to)) = (
                 inodes.iter().position(|&n| n == v_from_idx),
                 inodes.iter().position(|&n| n == v_to_idx),
@@ -1132,259 +1139,215 @@ impl Mesh2d<TriangleElement> {
                     }
                 };
 
+                let collapsed_edge_idx =
+                    element.as_ref().iedges[local_edge_idx(local_from, local_to)];
+                edges_to_remove.insert(collapsed_edge_idx);
+
                 // The "from" edge connects the "from" vertex and the other vertex.
                 let from_edge_local_idx = local_edge_idx(local_from, local_other);
-                let from_edge_idx = element.iedges[from_edge_local_idx];
+                let from_edge_idx = element.as_ref().iedges[from_edge_local_idx];
                 from_edges.push(from_edge_idx);
+
+                edges_to_remove.insert(from_edge_idx);
 
                 // The "to" edge connects the "to" vertex and the other vertex.
                 let to_edge_local_idx = local_edge_idx(local_to, local_other);
-                let to_edge_idx = element.iedges[to_edge_local_idx];
+                let to_edge_idx = element.as_ref().iedges[to_edge_local_idx];
+                dbg!(&to_edge_idx);
                 to_edges.push(to_edge_idx);
 
                 edges_to_merge.insert(from_edge_idx, to_edge_idx);
 
                 // Find the neighbors of the collapsed element across the "from" and "to" edges.
                 let from_neighbor_opt = self.edges[from_edge_idx]
+                    .as_ref()
                     .parents
                     .iter()
                     .find(|&&p| p != elem_idx)
                     .copied();
                 let to_neighbor_opt = self.edges[to_edge_idx]
+                    .as_ref()
                     .parents
                     .iter()
                     .find(|&&p| p != elem_idx)
                     .copied();
+
+                // Update parents and local ids of the to edge
+                if let (Some(collapsed_idx_in_to_edge), Some(kept_idx_in_from_edge)) = (
+                    self.edges[to_edge_idx]
+                        .as_ref()
+                        .parents
+                        .iter()
+                        .position(|&p| p == elem_idx),
+                    self.edges[from_edge_idx]
+                        .as_ref()
+                        .parents
+                        .iter()
+                        .position(|&p| p != elem_idx),
+                ) {
+                    self.edges[to_edge_idx].as_mut().parents[collapsed_idx_in_to_edge] =
+                        self.edges[from_edge_idx].as_ref().parents[kept_idx_in_from_edge];
+                    self.edges[to_edge_idx].as_mut().local_ids[collapsed_idx_in_to_edge] =
+                        self.edges[from_edge_idx].as_ref().local_ids[kept_idx_in_from_edge];
+                }
+
+                // Update parents of the to node by taking symmetric difference of parents of the from and to nodes
+                let mut new_parents: Vec<usize> = parents_from
+                    .symmetric_difference(&parents_to)
+                    .cloned()
+                    .collect();
+                new_parents.sort();
+                self.nodes[v_to_idx].as_mut().parents = new_parents;
 
                 // Update the neighbors' connectivity.
                 match (from_neighbor_opt, to_neighbor_opt) {
                     (Some(from_neighbor_idx), Some(to_neighbor_idx)) => {
                         // Case 1: Both edges are interior. The two neighbors become adjacent.
                         let merged_edge_local_idx_from = self.elements[from_neighbor_idx]
+                            .as_ref()
                             .iedges
                             .iter()
                             .position(|&e| e == from_edge_idx)
                             .unwrap();
                         let merged_edge_local_idx_to = self.elements[to_neighbor_idx]
+                            .as_ref()
                             .iedges
                             .iter()
                             .position(|&e| e == to_edge_idx)
                             .unwrap();
 
                         // Update `from_neighbor` to point to `to_neighbor` via `to_edge`.
-                        self.elements[from_neighbor_idx].iedges[merged_edge_local_idx_from] =
-                            to_edge_idx;
-                        self.elements[from_neighbor_idx].ineighbors[merged_edge_local_idx_from] =
-                            to_neighbor_idx;
+                        self.elements[from_neighbor_idx].as_mut().iedges
+                            [merged_edge_local_idx_from] = to_edge_idx;
+                        if let Some(pos) = self.elements[from_neighbor_idx]
+                            .as_ref()
+                            .ineighbors
+                            .iter()
+                            .position(|&i| i == elem_idx)
+                        {
+                            self.elements[from_neighbor_idx].as_mut().ineighbors[pos] =
+                                to_neighbor_idx;
+                        }
 
                         // Update `to_neighbor` to point back to `from_neighbor`.
-                        self.elements[to_neighbor_idx].ineighbors[merged_edge_local_idx_to] =
-                            from_neighbor_idx;
+                        if let Some(pos) = self.elements[to_neighbor_idx]
+                            .as_ref()
+                            .ineighbors
+                            .iter()
+                            .position(|&i| i == elem_idx)
+                        {
+                            self.elements[to_neighbor_idx].as_mut().ineighbors[pos] =
+                                from_neighbor_idx;
+                        }
                     }
                     (Some(from_neighbor_idx), None) => {
                         // Case 2: Only from_edge is interior. `to_edge` is on the boundary.
                         // The neighbor across from_edge now borders the boundary.
                         if let Some(pos) = self.elements[from_neighbor_idx]
+                            .as_ref()
                             .ineighbors
                             .iter()
                             .position(|&n| n == elem_idx)
                         {
-                            self.elements[from_neighbor_idx].ineighbors.remove(pos);
+                            let merged_edge_local_idx_from = self.elements[from_neighbor_idx]
+                                .as_ref()
+                                .iedges
+                                .iter()
+                                .position(|&e| e == from_edge_idx)
+                                .unwrap();
+                            self.elements[from_neighbor_idx].as_mut().iedges
+                                [merged_edge_local_idx_from] = to_edge_idx;
+                            self.elements[from_neighbor_idx]
+                                .as_mut()
+                                .ineighbors
+                                .remove(pos);
                         }
                     }
-                    (None, Some(to_neighbor_idx)) => {
+                    (None, Some(_)) => {
                         // Case 3: Only to_edge is interior. `from_edge` is on the boundary.
-                        // The neighbor across to_edge now borders the boundary.
-                        if let Some(pos) = self.elements[to_neighbor_idx]
-                            .ineighbors
-                            .iter()
-                            .position(|&n| n == elem_idx)
-                        {
-                            self.elements[to_neighbor_idx].ineighbors.remove(pos);
-                        }
+                        // This is impossible since boundary nodes are never removed.
+                        unreachable!();
                     }
                     (None, None) => {
                         // Case 4: Both are boundary edges. No neighbor connectivity to update.
+                        unreachable!();
                     }
                 }
             }
         }
 
-        // Find all edges connected to the node we are removing.
+        // --- 3. Update the nodes of the affected elements and edges. ---
         let mut affected_edges = HashSet::new();
         for &elem_idx in &affected_elements {
             let element = &mut self.elements[elem_idx];
             // We only need to update elements connected to the node we are removing.
-            if let Some(local_from_pos) = element.inodes.iter().position(|&n| n == v_from_idx) {
+            if let Some(local_from_pos) = element
+                .as_ref()
+                .inodes
+                .iter()
+                .position(|&n| n == v_from_idx)
+            {
                 // This element is connected to v_from_idx.
                 // First, update its node list to point to v_to_idx.
-                element.inodes[local_from_pos] = v_to_idx;
+                element.as_mut().inodes[local_from_pos] = v_to_idx;
 
                 // The two edges connected to the old v_from_idx in this element are:
-                let edge1_idx = element.iedges[local_from_pos];
-                let edge2_idx = element.iedges[(local_from_pos + 2) % 3];
+                let edge1_idx = element.as_ref().iedges[local_from_pos];
+                let edge2_idx = element.as_ref().iedges[(local_from_pos + 2) % 3];
 
                 affected_edges.insert(edge1_idx);
                 affected_edges.insert(edge2_idx);
             }
         }
 
+        // Update edges connected to v_from_idx.
         for &edge_idx in &affected_edges {
             let edge = &mut self.edges[edge_idx];
-            if let Some(local_from_pos) = edge.inodes.iter().position(|&n| n == v_from_idx) {
-                edge.inodes[local_from_pos] = v_to_idx;
-            }
-        }
-
-        // --- 2b. Update free/interior node lists based on DOF transfer ---
-        let v_from_is_interior = self.interior_nodes.iter().any(|&n| n == v_from_idx);
-        if v_from_is_interior {
-            if !self.interior_nodes.iter().any(|&n| n == v_to_idx) {
-                self.interior_nodes.push(v_to_idx);
-                self.free_bnd_x.retain(|&n| n != v_to_idx);
-                self.free_bnd_y.retain(|&n| n != v_to_idx);
-            }
-        } else {
-            if self.free_bnd_x.iter().any(|&n| n == v_from_idx)
-                && !self.free_bnd_x.iter().any(|&n| n == v_to_idx)
-                && !self.interior_nodes.iter().any(|&n| n == v_to_idx)
+            if let Some(local_from_pos) = edge.as_ref().inodes.iter().position(|&n| n == v_from_idx)
             {
-                self.free_bnd_x.push(v_to_idx);
-            }
-            if self.free_bnd_y.iter().any(|&n| n == v_from_idx)
-                && !self.free_bnd_y.iter().any(|&n| n == v_to_idx)
-                && !self.interior_nodes.iter().any(|&n| n == v_to_idx)
-            {
-                self.free_bnd_y.push(v_to_idx);
+                edge.as_mut().inodes[local_from_pos] = v_to_idx;
             }
         }
 
-        // --- 3. Remove the merged node and create its remapping vector ---
-        let mut node_remap = (0..self.nodes.len()).collect::<Vec<_>>();
-        let v_from_parents = self.nodes[v_from_idx].parents.clone();
-        let v_to_node_parents = &mut self.nodes[v_to_idx].parents;
-        v_to_node_parents.extend(v_from_parents);
-        v_to_node_parents.sort_unstable();
-        v_to_node_parents.dedup();
-
-        self.nodes.remove(v_from_idx);
-        node_remap.remove(v_from_idx);
-        for i in v_from_idx..node_remap.len() {
-            node_remap[i] -= 1;
+        // --- 4. Remove the collapsed elements, edges, and nodes. ---
+        let mut elements_to_remove_vec: Vec<usize> = elements_to_remove.iter().cloned().collect();
+        elements_to_remove_vec.sort();
+        elements_to_remove_vec.reverse();
+        for &elem_idx in &elements_to_remove_vec {
+            self.elements[elem_idx].mark_as_removed();
         }
-
-        let remap_node_idx = |idx: usize| {
-            if idx == v_from_idx {
-                v_to_idx
-            } else if idx > v_from_idx {
-                idx - 1
-            } else {
-                idx
-            }
-        };
-
-        // --- 4. Update all mesh entity connectivities ---
-        let remap_node = |n: &mut usize| {
-            if *n == v_from_idx {
-                *n = v_to_idx;
-            }
-            *n = node_remap[*n];
-        };
-        let remap_elem = |e: &mut usize| {
-            if *e != usize::MAX {
-                *e = element_remap[*e];
-            }
-        };
-
-        // --- 4b. Update boundary and free-node list connectivities ---
-        let remap_node_list = |list: &mut Vec<usize>| {
-            list.iter_mut().for_each(|n| remap_node(n));
-            list.sort_unstable();
-            list.dedup();
-        };
-
-        for bnd in &mut self.constant_bnds {
-            remap_node_list(&mut bnd.inodes);
+        let mut edges_to_remove_vec: Vec<usize> = edges_to_remove.iter().cloned().collect();
+        edges_to_remove_vec.sort();
+        edges_to_remove_vec.reverse();
+        for &edge_idx in &edges_to_remove_vec {
+            self.interior_edges
+                .retain(|edge| edges_to_remove.contains(edge));
+            self.polynomial_bnds.iter_mut().for_each(|bnd| {
+                bnd.iedges.retain(|edge| !edges_to_remove.contains(edge));
+            });
+            self.constant_bnds.iter_mut().for_each(|bnd| {
+                bnd.iedges.retain(|edge| !edges_to_remove.contains(edge));
+            });
+            self.open_bnds.iter_mut().for_each(|bnd| {
+                bnd.iedges.retain(|edge| !edges_to_remove.contains(edge));
+            });
+            self.edges[edge_idx].mark_as_removed();
         }
-        for bnd in &mut self.polynomial_bnds {
-            remap_node_list(&mut bnd.inodes);
-        }
-        for bnd in &mut self.open_bnds {
-            remap_node_list(&mut bnd.inodes);
-        }
-        remap_node_list(&mut self.interior_nodes);
-        remap_node_list(&mut self.free_bnd_x);
-        remap_node_list(&mut self.free_bnd_y);
+        // Remove nodes from interior_nodes, free_bnd_x, free_bnd_y
+        self.interior_nodes.retain(|&node| node != v_from_idx);
+        self.free_bnd_x.retain(|&node| node != v_from_idx);
+        self.free_bnd_y.retain(|&node| node != v_from_idx);
 
-        // Update node parent elements.
-        for node in &mut self.nodes {
-            node.parents.retain(|e| element_remap[*e] != usize::MAX);
-            for parent in &mut node.parents {
-                remap_elem(parent);
-            }
-        }
+        self.polynomial_bnds.iter_mut().for_each(|bnd| {
+            bnd.inodes.retain(|&node| node != v_from_idx);
+        });
+        self.constant_bnds.iter_mut().for_each(|bnd| {
+            bnd.inodes.retain(|&node| node != v_from_idx);
+        });
+        self.open_bnds.iter_mut().for_each(|bnd| {
+            bnd.inodes.retain(|&node| node != v_from_idx);
+        });
 
-        // Update edge nodes and parent elements.
-        for edge in &mut self.edges {
-            for inode in &mut edge.inodes {
-                remap_node(inode);
-            }
-            edge.parents.retain(|e| element_remap[*e] != usize::MAX);
-            for parent in &mut edge.parents {
-                remap_elem(parent);
-            }
-        }
-
-        // Update element nodes and neighbors.
-        for elem in &mut self.elements {
-            for inode in &mut elem.inodes {
-                remap_node(inode);
-            }
-            elem.ineighbors.retain(|e| element_remap[*e] != usize::MAX);
-            for neighbor in &mut elem.ineighbors {
-                remap_elem(neighbor);
-            }
-        }
-
-        // --- 5. Remove duplicate or invalid edges ---
-        // After merging nodes, some edges might become duplicates or invalid (e.g. connecting a node to itself).
-        let mut edge_map = std::collections::HashMap::new();
-        for (i, edge) in self.edges.iter().enumerate() {
-            let key = (
-                edge.inodes[0].min(edge.inodes[1]),
-                edge.inodes[0].max(edge.inodes[1]),
-            );
-            if let Some(existing_idx) = edge_map.get(&key) {
-                edges_to_remove.insert(i);
-                edges_to_remove.insert(*existing_idx);
-            } else {
-                edge_map.insert(key, i);
-            }
-        }
-
-        // Rebuild the edges vector without the removed ones.
-        let old_edges = self.edges.clone();
-        self.edges.clear();
-        let mut edge_remap = (0..old_edges.len()).collect::<Vec<_>>();
-        current_idx = 0;
-        for i in 0..old_edges.len() {
-            if !edges_to_remove.contains(&i) {
-                self.edges.push(old_edges[i].clone());
-                edge_remap[i] = current_idx;
-                current_idx += 1;
-            }
-        }
-
-        // Update elements with the new edge indices.
-        for elem in &mut self.elements {
-            for iedge in &mut elem.iedges {
-                *iedge = edge_remap[*iedge];
-            }
-        }
-
-        // --- 6. Finalize mesh state ---
-        self.node_num = self.nodes.len();
-        self.elem_num = self.elements.len();
-        element_remap
+        self.nodes[v_from_idx].mark_as_removed();
     }
 }

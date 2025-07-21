@@ -196,16 +196,18 @@ pub trait ADER1DScalarShockTracking: ADER1DMatrices {
         dim: BoundaryDimension,
     ) -> Array1<f64> {
         let get_coord = |inode: usize| match dim {
-            BoundaryDimension::Spatial => submesh.nodes[inode].x,
-            BoundaryDimension::Temporal => submesh.nodes[inode].y,
+            BoundaryDimension::Spatial => submesh.nodes[inode].as_ref().x,
+            BoundaryDimension::Temporal => submesh.nodes[inode].as_ref().y,
         };
 
         let elem_node_coords = Array1::from_iter(
             boundary_iedges
                 .iter()
-                .map(|&iedge| get_coord(submesh.edges[iedge].inodes[0]))
+                .map(|&iedge| get_coord(submesh.edges[iedge].as_ref().inodes[0]))
                 .chain(std::iter::once(get_coord(
-                    submesh.edges[boundary_iedges[boundary_iedges.len() - 1]].inodes[1],
+                    submesh.edges[boundary_iedges[boundary_iedges.len() - 1]]
+                        .as_ref()
+                        .inodes[1],
                 ))),
         );
 
@@ -220,16 +222,18 @@ pub trait ADER1DScalarShockTracking: ADER1DMatrices {
         dim: BoundaryDimension,
     ) -> Array1<f64> {
         let get_coord = |inode: usize| match dim {
-            BoundaryDimension::Spatial => submesh.nodes[inode].x,
-            BoundaryDimension::Temporal => submesh.nodes[inode].y,
+            BoundaryDimension::Spatial => submesh.nodes[inode].as_ref().x,
+            BoundaryDimension::Temporal => submesh.nodes[inode].as_ref().y,
         };
 
         let elem_node_coords = Array1::from_iter(
             boundary_iedges
                 .iter()
-                .map(|&iedge| get_coord(submesh.edges[iedge].inodes[0]))
+                .map(|&iedge| get_coord(submesh.edges[iedge].as_ref().inodes[0]))
                 .chain(std::iter::once(get_coord(
-                    submesh.edges[boundary_iedges[boundary_iedges.len() - 1]].inodes[1],
+                    submesh.edges[boundary_iedges[boundary_iedges.len() - 1]]
+                        .as_ref()
+                        .inodes[1],
                 ))),
         );
 

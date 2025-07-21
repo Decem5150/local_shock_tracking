@@ -11,6 +11,7 @@ use crate::{
         P0Solver, SQP, SpaceTimeSolver1DScalar,
         ader::{ADER1DMatrices, ADER1DScalarShockTracking},
         geometric::Geometric2D,
+        mesh::mesh2d::Status,
     },
     solver::SolverParameters,
 };
@@ -264,32 +265,34 @@ impl P0Solver for Disc1dBurgers1dSpaceTime<'_> {
         let cfl = 0.5;
 
         for (ielem, elem) in mesh.elements.iter().enumerate() {
-            let u_elem = solutions.slice(s![ielem, ..]);
-            let u_max = u_elem
-                .iter()
-                .map(|&val| val.abs())
-                .max_by(|a, b| a.partial_cmp(b).unwrap())
-                .unwrap_or(0.0);
-            let beta_mag = (u_max.powi(2) + 1.0).sqrt();
+            if let Status::Active(elem) = &elem {
+                let u_elem = solutions.slice(s![ielem, ..]);
+                let u_max = u_elem
+                    .iter()
+                    .map(|&val| val.abs())
+                    .max_by(|a, b| a.partial_cmp(b).unwrap())
+                    .unwrap_or(0.0);
+                let beta_mag = (u_max.powi(2) + 1.0).sqrt();
 
-            let mut min_len_sq = std::f64::MAX;
-            for &iedge in &elem.iedges {
-                let edge = &mesh.edges[iedge];
-                let n0 = &mesh.nodes[edge.inodes[0]];
-                let n1 = &mesh.nodes[edge.inodes[1]];
-                let len_sq = (n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2);
-                if len_sq < min_len_sq {
-                    min_len_sq = len_sq;
+                let mut min_len_sq = std::f64::MAX;
+                for &iedge in &elem.iedges {
+                    let edge = &mesh.edges[iedge].as_ref();
+                    let n0 = mesh.nodes[edge.inodes[0]].as_ref();
+                    let n1 = mesh.nodes[edge.inodes[1]].as_ref();
+                    let len_sq = (n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2);
+                    if len_sq < min_len_sq {
+                        min_len_sq = len_sq;
+                    }
                 }
+                let min_len = min_len_sq.sqrt();
+
+                let x: [f64; 3] = std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].as_ref().x);
+                let y: [f64; 3] = std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].as_ref().y);
+                let area = Self::compute_element_area(&x, &y);
+                let char_len = 2.0 * area / min_len;
+
+                dts[ielem] = cfl * char_len / beta_mag;
             }
-            let min_len = min_len_sq.sqrt();
-
-            let x: [f64; 3] = std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].x);
-            let y: [f64; 3] = std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].y);
-            let area = Self::compute_element_area(&x, &y);
-            let char_len = 2.0 * area / min_len;
-
-            dts[ielem] = cfl * char_len / beta_mag;
         }
         dts
     }

@@ -23,7 +23,7 @@ use crate::disc::{
     basis::{Basis, lagrange1d::LobattoBasis, triangle::TriangleBasis},
     boundary::{BoundaryPosition, scalar1d::PolynomialBoundary},
     geometric::Geometric2D,
-    mesh::mesh2d::{Mesh2d, TriangleElement},
+    mesh::mesh2d::{Mesh2d, Status, TriangleElement},
 };
 pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
     fn compute_initial_guess(&self, mesh: &Mesh2d<TriangleElement>) -> Array2<f64> {
@@ -53,12 +53,15 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
             let dts = self.compute_time_steps(mesh, solutions.view());
 
             for ielem in 0..nelem {
-                let elem = &mesh.elements[ielem];
-                let x: [f64; 3] = std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].x);
-                let y: [f64; 3] = std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].y);
-                let area = Self::compute_element_area(&x, &y);
+                if let Status::Active(elem) = &mesh.elements[ielem] {
+                    let x: [f64; 3] =
+                        std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].as_ref().x);
+                    let y: [f64; 3] =
+                        std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].as_ref().y);
+                    let area = Self::compute_element_area(&x, &y);
 
-                solutions[[ielem, 0]] -= dts[ielem] / area * residuals[[ielem, 0]];
+                    solutions[[ielem, 0]] -= dts[ielem] / area * residuals[[ielem, 0]];
+                }
             }
             println!("iter: {:?}", i);
             println!("p0_solutions: {:?}", solutions);
@@ -77,42 +80,43 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
 
         // Internal edges
         for &iedge in &mesh.interior_edges {
-            let edge = &mesh.edges[iedge];
-            let ileft = edge.parents[0];
-            let iright = edge.parents[1];
+            if let Status::Active(edge) = &mesh.edges[iedge] {
+                let ileft = edge.parents[0];
+                let iright = edge.parents[1];
 
-            let u_left = solutions[(ileft, 0)];
-            let u_right = solutions[(iright, 0)];
+                let u_left = solutions[(ileft, 0)];
+                let u_right = solutions[(iright, 0)];
 
-            let n0 = &mesh.nodes[edge.inodes[0]];
-            let n1 = &mesh.nodes[edge.inodes[1]];
+                let local_ids = &edge.local_ids;
+                let n0 = mesh.nodes[edge.inodes[local_ids[0]]].as_ref();
+                let n1 = mesh.nodes[edge.inodes[(local_ids[0] + 1) % 3]].as_ref();
 
-            let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
+                let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
 
-            // Per the user's convention, edge.parents[0] is the left element.
-            // The node ordering in edge.inodes is assumed to be counter-clockwise for the left element,
-            // so the normal computed from (n0, n1) will point from left to right.
-            let flux = self.compute_numerical_flux(u_left, u_right, n0.x, n1.x, n0.y, n1.y);
-            residuals[(ileft, 0)] += flux * edge_length;
-            residuals[(iright, 0)] -= flux * edge_length;
+                let flux = self.compute_numerical_flux(u_left, u_right, n0.x, n1.x, n0.y, n1.y);
+                residuals[(ileft, 0)] += flux * edge_length;
+                residuals[(iright, 0)] -= flux * edge_length;
+            }
         }
 
         // Constant boundaries
         for bnd in &mesh.constant_bnds {
             let ub = bnd.value;
             for &iedge in &bnd.iedges {
-                let edge = &mesh.edges[iedge];
-                let ielem = edge.parents[0];
-                let u = solutions[(ielem, 0)];
-                let n0 = &mesh.nodes[edge.inodes[0]];
-                let n1 = &mesh.nodes[edge.inodes[1]];
-                let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
+                if let Status::Active(edge) = &mesh.edges[iedge] {
+                    let ielem = edge.parents[0];
+                    let u = solutions[(ielem, 0)];
+                    let local_id = edge.local_ids[0];
+                    let n0 = mesh.nodes[edge.inodes[local_id]].as_ref();
+                    let n1 = mesh.nodes[edge.inodes[(local_id + 1) % 3]].as_ref();
+                    let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
 
-                // For boundary edges, the node ordering is assumed to be counter-clockwise
-                // for the parent element, so the normal computed from (n0, n1) is outward-pointing.
-                let flux = self.compute_boundary_flux(u, ub, n0.x, n1.x, n0.y, n1.y);
+                    // For boundary edges, the node ordering is assumed to be counter-clockwise
+                    // for the parent element, so the normal computed from (n0, n1) is outward-pointing.
+                    let flux = self.compute_boundary_flux(u, ub, n0.x, n1.x, n0.y, n1.y);
 
-                residuals[(ielem, 0)] += flux * edge_length;
+                    residuals[(ielem, 0)] += flux * edge_length;
+                }
             }
         }
         // Polynomial boundaries
@@ -121,50 +125,48 @@ pub trait P0Solver: Geometric2D + SpaceTimeSolver1DScalar {
             let nodal_coeffs = &bnd.nodal_coeffs;
 
             for &iedge in iedges {
-                let edge = &mesh.edges[iedge];
-                let ielem = edge.parents[0];
-                let u = solutions[(ielem, 0)];
-                let n0 = &mesh.nodes[edge.inodes[0]];
-                let n1 = &mesh.nodes[edge.inodes[1]];
-                let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
-                let (coord0, coord1) = match bnd.position {
-                    BoundaryPosition::Lower => {
-                        (mesh.nodes[edge.inodes[0]].x, mesh.nodes[edge.inodes[1]].x)
-                    }
-                    BoundaryPosition::Right => {
-                        (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y)
-                    }
-                    BoundaryPosition::Left => {
-                        (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y)
-                    }
-                    _ => panic!("Invalid boundary normal"),
-                };
-                let xi = array![0.5];
-                let bnd_value = compute_boundary_value_by_interpolation(
-                    &nodal_coeffs,
-                    self.basis().basis1d.n,
-                    &xi,
-                    &self.basis().basis1d.inv_vandermonde,
-                    coord0,
-                    coord1,
-                );
+                if let Status::Active(edge) = &mesh.edges[iedge] {
+                    let ielem = edge.parents[0];
+                    let u = solutions[(ielem, 0)];
+                    let local_id = edge.local_ids[0];
+                    let n0 = mesh.nodes[edge.inodes[local_id]].as_ref();
+                    let n1 = mesh.nodes[edge.inodes[(local_id + 1) % 3]].as_ref();
+                    let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
+                    let (coord0, coord1) = match bnd.position {
+                        BoundaryPosition::Lower => (n0.x, n1.x),
+                        BoundaryPosition::Right => (n0.y, n1.y),
+                        BoundaryPosition::Left => (n0.y, n1.y),
+                        _ => panic!("Invalid boundary normal"),
+                    };
+                    let xi = array![0.5];
+                    let bnd_value = compute_boundary_value_by_interpolation(
+                        &nodal_coeffs,
+                        self.basis().basis1d.n,
+                        &xi,
+                        &self.basis().basis1d.inv_vandermonde,
+                        coord0,
+                        coord1,
+                    );
 
-                let flux = self.compute_boundary_flux(u, bnd_value[0], n0.x, n1.x, n0.y, n1.y);
-                residuals[(ielem, 0)] += flux * edge_length;
+                    let flux = self.compute_boundary_flux(u, bnd_value[0], n0.x, n1.x, n0.y, n1.y);
+                    residuals[(ielem, 0)] += flux * edge_length;
+                }
             }
         }
         // Open boundaries
         for bnd in &mesh.open_bnds {
             let iedges = &bnd.iedges;
             for &iedge in iedges {
-                let edge = &mesh.edges[iedge];
-                let ielem = edge.parents[0];
-                let u = solutions[(ielem, 0)];
-                let n0 = &mesh.nodes[edge.inodes[0]];
-                let n1 = &mesh.nodes[edge.inodes[1]];
-                let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
-                let flux = self.compute_open_boundary_flux(u, n0.x, n1.x, n0.y, n1.y);
-                residuals[(ielem, 0)] += flux * edge_length;
+                if let Status::Active(edge) = &mesh.edges[iedge] {
+                    let ielem = edge.parents[0];
+                    let u = solutions[(ielem, 0)];
+                    let local_id = edge.local_ids[0];
+                    let n0 = mesh.nodes[edge.inodes[local_id]].as_ref();
+                    let n1 = mesh.nodes[edge.inodes[(local_id + 1) % 3]].as_ref();
+                    let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
+                    let flux = self.compute_open_boundary_flux(u, n0.x, n1.x, n0.y, n1.y);
+                    residuals[(ielem, 0)] += flux * edge_length;
+                }
             }
         }
     }
@@ -221,134 +223,141 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
         let nedge_basis = basis.quad_p.len();
         let edge_weights = &basis.quad_w;
         for (ielem, elem) in mesh.elements.iter().enumerate() {
-            let inodes = &elem.inodes;
-            let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
-            let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
-            let interp_sol = if is_enriched {
-                self.interp_node_to_enriched_cubature()
-                    .dot(&solutions.slice(s![ielem, ..]))
-            } else {
-                self.interp_node_to_cubature()
-                    .dot(&solutions.slice(s![ielem, ..]))
-            };
-            for itest_func in 0..ncell_basis {
-                let res = self.volume_integral(
-                    basis,
-                    itest_func,
-                    &interp_sol.as_slice().unwrap(),
-                    &x_slice,
-                    &y_slice,
-                );
-                residuals[(ielem, itest_func)] += res;
+            if let Status::Active(elem) = elem {
+                let inodes = &elem.inodes;
+                let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().x);
+                let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().y);
+                let interp_sol = if is_enriched {
+                    self.interp_node_to_enriched_cubature()
+                        .dot(&solutions.slice(s![ielem, ..]))
+                } else {
+                    self.interp_node_to_cubature()
+                        .dot(&solutions.slice(s![ielem, ..]))
+                };
+                for itest_func in 0..ncell_basis {
+                    let res = self.volume_integral(
+                        basis,
+                        itest_func,
+                        &interp_sol.as_slice().unwrap(),
+                        &x_slice,
+                        &y_slice,
+                    );
+                    residuals[(ielem, itest_func)] += res;
+                }
             }
         }
         for &iedge in mesh.interior_edges.iter() {
-            let edge = &mesh.edges[iedge];
-            let ilelem = edge.parents[0];
-            let irelem = edge.parents[1];
-            let left_elem = &mesh.elements[ilelem];
-            let right_elem = &mesh.elements[irelem];
-            let left_inodes = &left_elem.inodes;
-            let right_inodes = &right_elem.inodes;
-            let left_x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[left_inodes[i]].x);
-            let left_y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[left_inodes[i]].y);
-            let right_x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[right_inodes[i]].x);
-            let right_y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[right_inodes[i]].y);
-            let common_edge = [edge.local_ids[0], edge.local_ids[1]];
-            let sol_nodes_along_edges = &self.basis().nodes_along_edges;
-            let nodes_along_edges = &basis.nodes_along_edges;
-            let local_ids = &edge.local_ids;
-            let left_ref_normal = Self::compute_ref_normal(local_ids[0]);
-            let right_ref_normal = Self::compute_ref_normal(local_ids[1]);
-            let left_edge_length = Self::compute_ref_edge_length(local_ids[0]);
-            let right_edge_length = Self::compute_ref_edge_length(local_ids[1]);
-            let (left_sol_slice, right_sol_slice) = {
-                let left_sol_slice = solutions.slice(s![ilelem, ..]).select(
+            if let Status::Active(edge) = &mesh.edges[iedge] {
+                let ilelem = edge.parents[0];
+                let irelem = edge.parents[1];
+                let left_elem = mesh.elements[ilelem].as_ref();
+                let right_elem = mesh.elements[irelem].as_ref();
+                let left_inodes = &left_elem.inodes;
+                let right_inodes = &right_elem.inodes;
+                let left_x_slice: [f64; 3] =
+                    std::array::from_fn(|i| mesh.nodes[left_inodes[i]].as_ref().x);
+                let left_y_slice: [f64; 3] =
+                    std::array::from_fn(|i| mesh.nodes[left_inodes[i]].as_ref().y);
+                let right_x_slice: [f64; 3] =
+                    std::array::from_fn(|i| mesh.nodes[right_inodes[i]].as_ref().x);
+                let right_y_slice: [f64; 3] =
+                    std::array::from_fn(|i| mesh.nodes[right_inodes[i]].as_ref().y);
+                let sol_nodes_along_edges = &self.basis().nodes_along_edges;
+                let nodes_along_edges = &basis.nodes_along_edges;
+                let local_ids = &edge.local_ids;
+                let left_ref_normal = Self::compute_ref_normal(local_ids[0]);
+                let right_ref_normal = Self::compute_ref_normal(local_ids[1]);
+                let left_edge_length = Self::compute_ref_edge_length(local_ids[0]);
+                let right_edge_length = Self::compute_ref_edge_length(local_ids[1]);
+                let (left_sol_slice, right_sol_slice) = {
+                    let left_sol_slice = solutions.slice(s![ilelem, ..]).select(
+                        Axis(0),
+                        sol_nodes_along_edges
+                            .slice(s![local_ids[0], ..])
+                            .as_slice()
+                            .unwrap(),
+                    );
+                    let right_sol_slice = solutions.slice(s![irelem, ..]).select(
+                        Axis(0),
+                        sol_nodes_along_edges
+                            .slice(s![local_ids[1], ..])
+                            .as_slice()
+                            .unwrap(),
+                    );
+                    if is_enriched {
+                        (
+                            self.interp_node_to_enriched_quadrature()
+                                .dot(&left_sol_slice),
+                            self.interp_node_to_enriched_quadrature()
+                                .dot(&right_sol_slice),
+                        )
+                    } else {
+                        (left_sol_slice, right_sol_slice)
+                    }
+                };
+                let left_xi_slice = basis.r.select(
                     Axis(0),
-                    sol_nodes_along_edges
+                    nodes_along_edges
                         .slice(s![local_ids[0], ..])
                         .as_slice()
                         .unwrap(),
                 );
-                let right_sol_slice = solutions.slice(s![irelem, ..]).select(
+                let left_eta_slice = basis.s.select(
                     Axis(0),
-                    sol_nodes_along_edges
+                    nodes_along_edges
+                        .slice(s![local_ids[0], ..])
+                        .as_slice()
+                        .unwrap(),
+                );
+                let right_xi_slice = basis.r.select(
+                    Axis(0),
+                    nodes_along_edges
                         .slice(s![local_ids[1], ..])
                         .as_slice()
                         .unwrap(),
                 );
-                if is_enriched {
-                    (
-                        self.interp_node_to_enriched_quadrature()
-                            .dot(&left_sol_slice),
-                        self.interp_node_to_enriched_quadrature()
-                            .dot(&right_sol_slice),
-                    )
-                } else {
-                    (left_sol_slice, right_sol_slice)
+                let right_eta_slice = basis.s.select(
+                    Axis(0),
+                    nodes_along_edges
+                        .slice(s![local_ids[1], ..])
+                        .as_slice()
+                        .unwrap(),
+                );
+                for i in 0..nedge_basis {
+                    let left_value = left_sol_slice[i];
+                    let right_value = right_sol_slice[nedge_basis - 1 - i];
+                    let num_flux = self.compute_numerical_flux(
+                        left_value,
+                        right_value,
+                        left_x_slice[local_ids[0]],
+                        left_x_slice[(local_ids[0] + 1) % 3],
+                        left_y_slice[local_ids[0]],
+                        left_y_slice[(local_ids[0] + 1) % 3],
+                    );
+                    let left_scaling = self.compute_flux_scaling(
+                        left_xi_slice[i],
+                        left_eta_slice[i],
+                        left_ref_normal,
+                        &left_x_slice,
+                        &left_y_slice,
+                    );
+                    let right_scaling = self.compute_flux_scaling(
+                        right_xi_slice[nedge_basis - 1 - i],
+                        right_eta_slice[nedge_basis - 1 - i],
+                        right_ref_normal,
+                        &right_x_slice,
+                        &right_y_slice,
+                    );
+                    let left_transformed_flux = num_flux * left_scaling;
+                    let right_transformed_flux = -num_flux * right_scaling;
+                    let left_itest_func = basis.nodes_along_edges[(local_ids[0], i)];
+                    let right_itest_func =
+                        basis.nodes_along_edges[(local_ids[1], nedge_basis - 1 - i)];
+                    residuals[(ilelem, left_itest_func)] +=
+                        0.5 * left_edge_length * edge_weights[i] * left_transformed_flux;
+                    residuals[(irelem, right_itest_func)] +=
+                        0.5 * right_edge_length * edge_weights[i] * right_transformed_flux;
                 }
-            };
-            let left_xi_slice = basis.r.select(
-                Axis(0),
-                nodes_along_edges
-                    .slice(s![local_ids[0], ..])
-                    .as_slice()
-                    .unwrap(),
-            );
-            let left_eta_slice = basis.s.select(
-                Axis(0),
-                nodes_along_edges
-                    .slice(s![local_ids[0], ..])
-                    .as_slice()
-                    .unwrap(),
-            );
-            let right_xi_slice = basis.r.select(
-                Axis(0),
-                nodes_along_edges
-                    .slice(s![local_ids[1], ..])
-                    .as_slice()
-                    .unwrap(),
-            );
-            let right_eta_slice = basis.s.select(
-                Axis(0),
-                nodes_along_edges
-                    .slice(s![local_ids[1], ..])
-                    .as_slice()
-                    .unwrap(),
-            );
-            for i in 0..nedge_basis {
-                let left_value = left_sol_slice[i];
-                let right_value = right_sol_slice[nedge_basis - 1 - i];
-                let num_flux = self.compute_numerical_flux(
-                    left_value,
-                    right_value,
-                    left_x_slice[common_edge[0]],
-                    left_x_slice[(common_edge[0] + 1) % 3],
-                    left_y_slice[common_edge[0]],
-                    left_y_slice[(common_edge[0] + 1) % 3],
-                );
-                let left_scaling = self.compute_flux_scaling(
-                    left_xi_slice[i],
-                    left_eta_slice[i],
-                    left_ref_normal,
-                    &left_x_slice,
-                    &left_y_slice,
-                );
-                let right_scaling = self.compute_flux_scaling(
-                    right_xi_slice[nedge_basis - 1 - i],
-                    right_eta_slice[nedge_basis - 1 - i],
-                    right_ref_normal,
-                    &right_x_slice,
-                    &right_y_slice,
-                );
-                let left_transformed_flux = num_flux * left_scaling;
-                let right_transformed_flux = -num_flux * right_scaling;
-                let left_itest_func = basis.nodes_along_edges[(local_ids[0], i)];
-                let right_itest_func = basis.nodes_along_edges[(local_ids[1], nedge_basis - 1 - i)];
-                residuals[(ilelem, left_itest_func)] +=
-                    0.5 * left_edge_length * edge_weights[i] * left_transformed_flux;
-                residuals[(irelem, right_itest_func)] +=
-                    0.5 * right_edge_length * edge_weights[i] * right_transformed_flux;
             }
         }
         // Constant boundaries
@@ -356,62 +365,65 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
             let iedges = &bnd.iedges;
             let bnd_value = bnd.value;
             for &iedge in iedges {
-                let edge = &mesh.edges[iedge];
-                let ielem = edge.parents[0];
-                let elem = &mesh.elements[ielem];
-                let inodes = &elem.inodes;
-                let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
-                let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
-                let sol_nodes_along_edges = &self.basis().nodes_along_edges;
-                let nodes_along_edges = &basis.nodes_along_edges;
-                let local_ids = &edge.local_ids;
-                let ref_normal = Self::compute_ref_normal(local_ids[0]);
-                let edge_length = Self::compute_ref_edge_length(local_ids[0]);
-                let sol_slice = {
-                    let sol_slice = solutions.slice(s![ielem, ..]).select(
+                if let Status::Active(edge) = &mesh.edges[iedge] {
+                    let ielem = edge.parents[0];
+                    let elem = mesh.elements[ielem].as_ref();
+                    let inodes = &elem.inodes;
+                    let x_slice: [f64; 3] =
+                        std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().x);
+                    let y_slice: [f64; 3] =
+                        std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().y);
+                    let sol_nodes_along_edges = &self.basis().nodes_along_edges;
+                    let nodes_along_edges = &basis.nodes_along_edges;
+                    let local_ids = &edge.local_ids;
+                    let ref_normal = Self::compute_ref_normal(local_ids[0]);
+                    let edge_length = Self::compute_ref_edge_length(local_ids[0]);
+                    let sol_slice = {
+                        let sol_slice = solutions.slice(s![ielem, ..]).select(
+                            Axis(0),
+                            sol_nodes_along_edges
+                                .slice(s![local_ids[0], ..])
+                                .as_slice()
+                                .unwrap(),
+                        );
+                        if is_enriched {
+                            self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                        } else {
+                            sol_slice
+                        }
+                    };
+                    let xi_slice = basis.r.select(
                         Axis(0),
-                        sol_nodes_along_edges
+                        nodes_along_edges
                             .slice(s![local_ids[0], ..])
                             .as_slice()
                             .unwrap(),
                     );
-                    if is_enriched {
-                        self.interp_node_to_enriched_quadrature().dot(&sol_slice)
-                    } else {
-                        sol_slice
-                    }
-                };
-                let xi_slice = basis.r.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                let eta_slice = basis.s.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                for i in 0..nedge_basis {
-                    let xi = xi_slice[i];
-                    let eta = eta_slice[i];
-                    let boundary_flux = self.compute_boundary_flux(
-                        sol_slice[i],
-                        bnd_value,
-                        x_slice[local_ids[0]],
-                        x_slice[(local_ids[0] + 1) % 3],
-                        y_slice[local_ids[0]],
-                        y_slice[(local_ids[0] + 1) % 3],
+                    let eta_slice = basis.s.select(
+                        Axis(0),
+                        nodes_along_edges
+                            .slice(s![local_ids[0], ..])
+                            .as_slice()
+                            .unwrap(),
                     );
-                    let scaling =
-                        self.compute_flux_scaling(xi, eta, ref_normal, &x_slice, &y_slice);
-                    let transformed_flux = boundary_flux * scaling;
-                    let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
-                    residuals[(ielem, itest_func)] +=
-                        0.5 * edge_length * edge_weights[i] * transformed_flux;
+                    for i in 0..nedge_basis {
+                        let xi = xi_slice[i];
+                        let eta = eta_slice[i];
+                        let boundary_flux = self.compute_boundary_flux(
+                            sol_slice[i],
+                            bnd_value,
+                            x_slice[local_ids[0]],
+                            x_slice[(local_ids[0] + 1) % 3],
+                            y_slice[local_ids[0]],
+                            y_slice[(local_ids[0] + 1) % 3],
+                        );
+                        let scaling =
+                            self.compute_flux_scaling(xi, eta, ref_normal, &x_slice, &y_slice);
+                        let transformed_flux = boundary_flux * scaling;
+                        let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
+                        residuals[(ielem, itest_func)] +=
+                            0.5 * edge_length * edge_weights[i] * transformed_flux;
+                    }
                 }
             }
         }
@@ -421,82 +433,81 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
             let iedges = &bnd.iedges;
             let nodal_coeffs = &bnd.nodal_coeffs;
             for &iedge in iedges {
-                let edge = &mesh.edges[iedge];
-                let ielem = edge.parents[0];
-                let elem = &mesh.elements[ielem];
-                let inodes = &elem.inodes;
-                let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
-                let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
-                let sol_nodes_along_edges = &self.basis().nodes_along_edges;
-                let nodes_along_edges = &basis.nodes_along_edges;
-                let local_ids = &edge.local_ids;
-                let ref_normal = Self::compute_ref_normal(local_ids[0]);
-                let edge_length = Self::compute_ref_edge_length(local_ids[0]);
-                let sol_slice = {
-                    let sol_slice = solutions.slice(s![ielem, ..]).select(
+                if let Status::Active(edge) = &mesh.edges[iedge] {
+                    let ielem = edge.parents[0];
+                    let elem = mesh.elements[ielem].as_ref();
+                    let inodes = &elem.inodes;
+                    let x_slice: [f64; 3] =
+                        std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().x);
+                    let y_slice: [f64; 3] =
+                        std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().y);
+                    let sol_nodes_along_edges = &self.basis().nodes_along_edges;
+                    let nodes_along_edges = &basis.nodes_along_edges;
+                    let local_ids = &edge.local_ids;
+                    let ref_normal = Self::compute_ref_normal(local_ids[0]);
+                    let edge_length = Self::compute_ref_edge_length(local_ids[0]);
+                    let sol_slice = {
+                        let sol_slice = solutions.slice(s![ielem, ..]).select(
+                            Axis(0),
+                            sol_nodes_along_edges
+                                .slice(s![local_ids[0], ..])
+                                .as_slice()
+                                .unwrap(),
+                        );
+                        if is_enriched {
+                            self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                        } else {
+                            sol_slice
+                        }
+                    };
+                    let xi_slice = basis.r.select(
                         Axis(0),
-                        sol_nodes_along_edges
+                        nodes_along_edges
                             .slice(s![local_ids[0], ..])
                             .as_slice()
                             .unwrap(),
                     );
-                    if is_enriched {
-                        self.interp_node_to_enriched_quadrature().dot(&sol_slice)
-                    } else {
-                        sol_slice
-                    }
-                };
-                let xi_slice = basis.r.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                let eta_slice = basis.s.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                let (coord0, coord1) = match bnd.position {
-                    BoundaryPosition::Lower => {
-                        (mesh.nodes[edge.inodes[0]].x, mesh.nodes[edge.inodes[1]].x)
-                    }
-                    BoundaryPosition::Right => {
-                        (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y)
-                    }
-                    BoundaryPosition::Left => {
-                        (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y)
-                    }
-                    _ => panic!("Invalid boundary normal"),
-                };
-                let bnd_values = compute_boundary_value_by_interpolation(
-                    &nodal_coeffs,
-                    self.basis().basis1d.n,
-                    &basis.basis1d.xi,
-                    &self.basis().basis1d.inv_vandermonde,
-                    coord0,
-                    coord1,
-                );
-                for i in 0..nedge_basis {
-                    let xi = xi_slice[i];
-                    let eta = eta_slice[i];
-                    let boundary_flux = self.compute_boundary_flux(
-                        sol_slice[i],
-                        bnd_values[i],
-                        mesh.nodes[edge.inodes[0]].x,
-                        mesh.nodes[edge.inodes[1]].x,
-                        mesh.nodes[edge.inodes[0]].y,
-                        mesh.nodes[edge.inodes[1]].y,
+                    let eta_slice = basis.s.select(
+                        Axis(0),
+                        nodes_along_edges
+                            .slice(s![local_ids[0], ..])
+                            .as_slice()
+                            .unwrap(),
                     );
-                    let scaling =
-                        self.compute_flux_scaling(xi, eta, ref_normal, &x_slice, &y_slice);
-                    let transformed_flux = boundary_flux * scaling;
-                    let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
-                    residuals[(ielem, itest_func)] +=
-                        0.5 * edge_length * edge_weights[i] * transformed_flux;
+                    let n0 = mesh.nodes[edge.inodes[local_ids[0]]].as_ref();
+                    let n1 = mesh.nodes[edge.inodes[(local_ids[0] + 1) % 3]].as_ref();
+                    let (coord0, coord1) = match bnd.position {
+                        BoundaryPosition::Lower => (n0.x, n1.x),
+                        BoundaryPosition::Right => (n0.y, n1.y),
+                        BoundaryPosition::Left => (n0.y, n1.y),
+                        _ => panic!("Invalid boundary normal"),
+                    };
+                    let bnd_values = compute_boundary_value_by_interpolation(
+                        &nodal_coeffs,
+                        self.basis().basis1d.n,
+                        &basis.basis1d.xi,
+                        &self.basis().basis1d.inv_vandermonde,
+                        coord0,
+                        coord1,
+                    );
+                    for i in 0..nedge_basis {
+                        let xi = xi_slice[i];
+                        let eta = eta_slice[i];
+                        let boundary_flux = self.compute_boundary_flux(
+                            sol_slice[i],
+                            bnd_values[i],
+                            x_slice[local_ids[0]],
+                            x_slice[(local_ids[0] + 1) % 3],
+                            y_slice[local_ids[0]],
+                            y_slice[(local_ids[0] + 1) % 3],
+                        );
+                        let scaling =
+                            self.compute_flux_scaling(xi, eta, ref_normal, &x_slice, &y_slice);
+                        let transformed_flux = boundary_flux * scaling;
+                        let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
+                        residuals[(ielem, itest_func)] +=
+                            0.5 * edge_length * edge_weights[i] * transformed_flux;
+                    }
                 }
             }
         }
@@ -504,62 +515,65 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
         for bnd in &mesh.open_bnds {
             let iedges = &bnd.iedges;
             for &iedge in iedges {
-                let edge = &mesh.edges[iedge];
-                let ielem = edge.parents[0];
-                let elem = &mesh.elements[ielem];
-                let inodes = &elem.inodes;
-                let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
-                let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
-                let sol_nodes_along_edges = &self.basis().nodes_along_edges;
-                let nodes_along_edges = &basis.nodes_along_edges;
-                let local_ids = &edge.local_ids;
-                let ref_normal = Self::compute_ref_normal(local_ids[0]);
-                let edge_length = Self::compute_ref_edge_length(local_ids[0]);
-                let sol_slice = {
-                    let sol_slice = solutions.slice(s![ielem, ..]).select(
+                if let Status::Active(edge) = &mesh.edges[iedge] {
+                    let ielem = edge.parents[0];
+                    let elem = mesh.elements[ielem].as_ref();
+                    let inodes = &elem.inodes;
+                    let x_slice: [f64; 3] =
+                        std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().x);
+                    let y_slice: [f64; 3] =
+                        std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().y);
+                    let sol_nodes_along_edges = &self.basis().nodes_along_edges;
+                    let nodes_along_edges = &basis.nodes_along_edges;
+                    let local_ids = &edge.local_ids;
+                    let ref_normal = Self::compute_ref_normal(local_ids[0]);
+                    let edge_length = Self::compute_ref_edge_length(local_ids[0]);
+                    let sol_slice = {
+                        let sol_slice = solutions.slice(s![ielem, ..]).select(
+                            Axis(0),
+                            sol_nodes_along_edges
+                                .slice(s![local_ids[0], ..])
+                                .as_slice()
+                                .unwrap(),
+                        );
+                        if is_enriched {
+                            self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                        } else {
+                            sol_slice
+                        }
+                    };
+                    let xi_slice = basis.r.select(
                         Axis(0),
-                        sol_nodes_along_edges
+                        nodes_along_edges
                             .slice(s![local_ids[0], ..])
                             .as_slice()
                             .unwrap(),
                     );
-                    if is_enriched {
-                        self.interp_node_to_enriched_quadrature().dot(&sol_slice)
-                    } else {
-                        sol_slice
-                    }
-                };
-                let xi_slice = basis.r.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                let eta_slice = basis.s.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                for i in 0..nedge_basis {
-                    let u = sol_slice[i];
-                    let xi = xi_slice[i];
-                    let eta = eta_slice[i];
-                    let boundary_flux = self.compute_open_boundary_flux(
-                        u,
-                        x_slice[local_ids[0]],
-                        x_slice[(local_ids[0] + 1) % 3],
-                        y_slice[local_ids[0]],
-                        y_slice[(local_ids[0] + 1) % 3],
+                    let eta_slice = basis.s.select(
+                        Axis(0),
+                        nodes_along_edges
+                            .slice(s![local_ids[0], ..])
+                            .as_slice()
+                            .unwrap(),
                     );
-                    let scaling =
-                        self.compute_flux_scaling(xi, eta, ref_normal, &x_slice, &y_slice);
-                    let transformed_flux = boundary_flux * scaling;
-                    let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
-                    residuals[(ielem, itest_func)] +=
-                        0.5 * edge_length * edge_weights[i] * transformed_flux;
+                    for i in 0..nedge_basis {
+                        let u = sol_slice[i];
+                        let xi = xi_slice[i];
+                        let eta = eta_slice[i];
+                        let boundary_flux = self.compute_open_boundary_flux(
+                            u,
+                            x_slice[local_ids[0]],
+                            x_slice[(local_ids[0] + 1) % 3],
+                            y_slice[local_ids[0]],
+                            y_slice[(local_ids[0] + 1) % 3],
+                        );
+                        let scaling =
+                            self.compute_flux_scaling(xi, eta, ref_normal, &x_slice, &y_slice);
+                        let transformed_flux = boundary_flux * scaling;
+                        let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
+                        residuals[(ielem, itest_func)] +=
+                            0.5 * edge_length * edge_weights[i] * transformed_flux;
+                    }
                 }
             }
         }
@@ -586,267 +600,281 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
         let nedge_basis = basis.quad_p.len();
         let edge_weights = &basis.quad_w;
         for (ielem, elem) in mesh.elements.iter().enumerate() {
-            let inodes = &elem.inodes;
-            let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
-            let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
-            let interp_matrix = if is_enriched {
-                &self.interp_node_to_enriched_cubature()
-            } else {
-                &self.interp_node_to_cubature()
-            };
-            let interp_sol = interp_matrix.dot(&solutions.slice(s![ielem, ..]));
-            for itest_func in 0..ncell_basis {
-                let mut dvol_sol: Array1<f64> = Array1::zeros(basis.cub_r.len());
-                let mut dvol_x: Array1<f64> = Array1::zeros(3);
-                let mut dvol_y: Array1<f64> = Array1::zeros(3);
-                let res = self.dvolume(
-                    basis,
-                    itest_func,
-                    &interp_sol.as_slice().unwrap(),
-                    dvol_sol.as_slice_mut().unwrap(),
-                    &x_slice,
-                    dvol_x.as_slice_mut().unwrap(),
-                    &y_slice,
-                    dvol_y.as_slice_mut().unwrap(),
-                    1.0,
-                );
-                residuals[(ielem, itest_func)] += res;
-                let dres_dsol_dofs = interp_matrix.t().dot(&dvol_sol);
+            if let Status::Active(elem) = elem {
+                let inodes = &elem.inodes;
+                let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().x);
+                let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().y);
+                let interp_matrix = if is_enriched {
+                    &self.interp_node_to_enriched_cubature()
+                } else {
+                    &self.interp_node_to_cubature()
+                };
+                let interp_sol = interp_matrix.dot(&solutions.slice(s![ielem, ..]));
+                for itest_func in 0..ncell_basis {
+                    let mut dvol_sol: Array1<f64> = Array1::zeros(basis.cub_r.len());
+                    let mut dvol_x: Array1<f64> = Array1::zeros(3);
+                    let mut dvol_y: Array1<f64> = Array1::zeros(3);
+                    let res = self.dvolume(
+                        basis,
+                        itest_func,
+                        &interp_sol.as_slice().unwrap(),
+                        dvol_sol.as_slice_mut().unwrap(),
+                        &x_slice,
+                        dvol_x.as_slice_mut().unwrap(),
+                        &y_slice,
+                        dvol_y.as_slice_mut().unwrap(),
+                        1.0,
+                    );
+                    residuals[(ielem, itest_func)] += res;
+                    let dres_dsol_dofs = interp_matrix.t().dot(&dvol_sol);
 
-                let res_row_idx = ielem * ncell_basis + itest_func;
-                let sol_col_range =
-                    ielem * unenriched_ncell_basis..(ielem + 1) * unenriched_ncell_basis;
-                dsol.slice_mut(s![res_row_idx, sol_col_range])
-                    .scaled_add(1.0, &dres_dsol_dofs);
-                for i in 0..3 {
-                    dx[(res_row_idx, inodes[i])] += dvol_x[i];
-                    dy[(res_row_idx, inodes[i])] += dvol_y[i];
+                    let res_row_idx = ielem * ncell_basis + itest_func;
+                    let sol_col_range =
+                        ielem * unenriched_ncell_basis..(ielem + 1) * unenriched_ncell_basis;
+                    dsol.slice_mut(s![res_row_idx, sol_col_range])
+                        .scaled_add(1.0, &dres_dsol_dofs);
+                    for i in 0..3 {
+                        dx[(res_row_idx, inodes[i])] += dvol_x[i];
+                        dy[(res_row_idx, inodes[i])] += dvol_y[i];
+                    }
                 }
             }
         }
         for &iedge in mesh.interior_edges.iter() {
-            let edge = &mesh.edges[iedge];
-            let ilelem = edge.parents[0];
-            let irelem = edge.parents[1];
-            let left_elem = &mesh.elements[ilelem];
-            let right_elem = &mesh.elements[irelem];
-            let left_inodes = &left_elem.inodes;
-            let right_inodes = &right_elem.inodes;
-            let left_x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[left_inodes[i]].x);
-            let left_y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[left_inodes[i]].y);
-            let right_x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[right_inodes[i]].x);
-            let right_y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[right_inodes[i]].y);
-            let common_edge = [edge.local_ids[0], edge.local_ids[1]];
-            let sol_nodes_along_edges = &self.basis().nodes_along_edges;
-            let nodes_along_edges = &basis.nodes_along_edges;
-            let local_ids = &edge.local_ids;
-            let left_ref_normal = Self::compute_ref_normal(local_ids[0]);
-            let right_ref_normal = Self::compute_ref_normal(local_ids[1]);
-            let left_edge_length = Self::compute_ref_edge_length(local_ids[0]);
-            let right_edge_length = Self::compute_ref_edge_length(local_ids[1]);
-            let (left_sol_slice, right_sol_slice) = {
-                let left_sol_slice = solutions.slice(s![ilelem, ..]).select(
+            if let Status::Active(edge) = &mesh.edges[iedge] {
+                let ilelem = edge.parents[0];
+                let irelem = edge.parents[1];
+                let left_elem = mesh.elements[ilelem].as_ref();
+                let right_elem = mesh.elements[irelem].as_ref();
+                let left_inodes = &left_elem.inodes;
+                let right_inodes = &right_elem.inodes;
+                let left_x_slice: [f64; 3] =
+                    std::array::from_fn(|i| mesh.nodes[left_inodes[i]].as_ref().x);
+                let left_y_slice: [f64; 3] =
+                    std::array::from_fn(|i| mesh.nodes[left_inodes[i]].as_ref().y);
+                let right_x_slice: [f64; 3] =
+                    std::array::from_fn(|i| mesh.nodes[right_inodes[i]].as_ref().x);
+                let right_y_slice: [f64; 3] =
+                    std::array::from_fn(|i| mesh.nodes[right_inodes[i]].as_ref().y);
+                let sol_nodes_along_edges = &self.basis().nodes_along_edges;
+                let nodes_along_edges = &basis.nodes_along_edges;
+                let local_ids = &edge.local_ids;
+                let left_ref_normal = Self::compute_ref_normal(local_ids[0]);
+                let right_ref_normal = Self::compute_ref_normal(local_ids[1]);
+                let left_edge_length = Self::compute_ref_edge_length(local_ids[0]);
+                let right_edge_length = Self::compute_ref_edge_length(local_ids[1]);
+                let (left_sol_slice, right_sol_slice) = {
+                    let left_sol_slice = solutions.slice(s![ilelem, ..]).select(
+                        Axis(0),
+                        sol_nodes_along_edges
+                            .slice(s![local_ids[0], ..])
+                            .as_slice()
+                            .unwrap(),
+                    );
+                    let right_sol_slice = solutions.slice(s![irelem, ..]).select(
+                        Axis(0),
+                        sol_nodes_along_edges
+                            .slice(s![local_ids[1], ..])
+                            .as_slice()
+                            .unwrap(),
+                    );
+                    if is_enriched {
+                        (
+                            self.interp_node_to_enriched_quadrature()
+                                .dot(&left_sol_slice),
+                            self.interp_node_to_enriched_quadrature()
+                                .dot(&right_sol_slice),
+                        )
+                    } else {
+                        (left_sol_slice, right_sol_slice)
+                    }
+                };
+                let left_xi_slice = basis.r.select(
                     Axis(0),
-                    sol_nodes_along_edges
+                    nodes_along_edges
                         .slice(s![local_ids[0], ..])
                         .as_slice()
                         .unwrap(),
                 );
-                let right_sol_slice = solutions.slice(s![irelem, ..]).select(
+                let left_eta_slice = basis.s.select(
                     Axis(0),
-                    sol_nodes_along_edges
+                    nodes_along_edges
+                        .slice(s![local_ids[0], ..])
+                        .as_slice()
+                        .unwrap(),
+                );
+                let right_xi_slice = basis.r.select(
+                    Axis(0),
+                    nodes_along_edges
                         .slice(s![local_ids[1], ..])
                         .as_slice()
                         .unwrap(),
                 );
-                if is_enriched {
-                    (
-                        self.interp_node_to_enriched_quadrature()
-                            .dot(&left_sol_slice),
-                        self.interp_node_to_enriched_quadrature()
-                            .dot(&right_sol_slice),
-                    )
-                } else {
-                    (left_sol_slice, right_sol_slice)
-                }
-            };
-            let left_xi_slice = basis.r.select(
-                Axis(0),
-                nodes_along_edges
-                    .slice(s![local_ids[0], ..])
-                    .as_slice()
-                    .unwrap(),
-            );
-            let left_eta_slice = basis.s.select(
-                Axis(0),
-                nodes_along_edges
-                    .slice(s![local_ids[0], ..])
-                    .as_slice()
-                    .unwrap(),
-            );
-            let right_xi_slice = basis.r.select(
-                Axis(0),
-                nodes_along_edges
-                    .slice(s![local_ids[1], ..])
-                    .as_slice()
-                    .unwrap(),
-            );
-            let right_eta_slice = basis.s.select(
-                Axis(0),
-                nodes_along_edges
-                    .slice(s![local_ids[1], ..])
-                    .as_slice()
-                    .unwrap(),
-            );
-            for i in 0..nedge_basis {
-                let left_value = left_sol_slice[i];
-                let right_value = right_sol_slice[nedge_basis - 1 - i];
-                let mut dflux_dleft_x = [0.0; 3];
-                let mut dflux_dleft_y = [0.0; 3];
-                let mut dflux_dright_x = [0.0; 3];
-                let mut dflux_dright_y = [0.0; 3];
-                let (num_flux, dflux_dul, dflux_dur, dflux_dx0, dflux_dx1, dflux_dy0, dflux_dy1): (
-                    f64,
-                    f64,
-                    f64,
-                    f64,
-                    f64,
-                    f64,
-                    f64,
-                ) = self.dnum_flux(
-                    left_value,
-                    right_value,
-                    left_x_slice[common_edge[0]],
-                    left_x_slice[(common_edge[0] + 1) % 3],
-                    left_y_slice[common_edge[0]],
-                    left_y_slice[(common_edge[0] + 1) % 3],
-                    1.0,
-                );
-                dflux_dleft_x[common_edge[0]] = dflux_dx0;
-                dflux_dleft_x[(common_edge[0] + 1) % 3] = dflux_dx1;
-                dflux_dleft_y[common_edge[0]] = dflux_dy0;
-                dflux_dleft_y[(common_edge[0] + 1) % 3] = dflux_dy1;
-                dflux_dright_x[common_edge[1]] = dflux_dx1;
-                dflux_dright_x[(common_edge[1] + 1) % 3] = dflux_dx0;
-                dflux_dright_y[common_edge[1]] = dflux_dy1;
-                dflux_dright_y[(common_edge[1] + 1) % 3] = dflux_dy0;
-
-                let mut dleft_scaling_dx = [0.0; 3];
-                let mut dleft_scaling_dy = [0.0; 3];
-                let mut dright_scaling_dx = [0.0; 3];
-                let mut dright_scaling_dy = [0.0; 3];
-                let left_scaling: f64 = self.dscaling(
-                    left_xi_slice[i],
-                    left_eta_slice[i],
-                    left_ref_normal,
-                    left_x_slice.as_slice(),
-                    dleft_scaling_dx.as_mut_slice(),
-                    left_y_slice.as_slice(),
-                    dleft_scaling_dy.as_mut_slice(),
-                    1.0,
-                );
-                let right_scaling: f64 = self.dscaling(
-                    right_xi_slice[nedge_basis - 1 - i],
-                    right_eta_slice[nedge_basis - 1 - i],
-                    right_ref_normal,
-                    right_x_slice.as_slice(),
-                    dright_scaling_dx.as_mut_slice(),
-                    right_y_slice.as_slice(),
-                    dright_scaling_dy.as_mut_slice(),
-                    1.0,
-                );
-
-                let left_transformed_flux = num_flux * left_scaling;
-                let right_transformed_flux = -num_flux * right_scaling;
-
-                let dleft_transformed_flux_dul = left_scaling * dflux_dul;
-                let dleft_transformed_flux_dur = left_scaling * dflux_dur;
-
-                let dleft_transformed_flux_dx = &ArrayView1::from(&dleft_scaling_dx) * num_flux
-                    + &ArrayView1::from(&dflux_dleft_x) * left_scaling;
-                let dleft_transformed_flux_dy = &ArrayView1::from(&dleft_scaling_dy) * num_flux
-                    + &ArrayView1::from(&dflux_dleft_y) * left_scaling;
-
-                let dright_transformed_flux_dul = -right_scaling * dflux_dul;
-                let dright_transformed_flux_dur = -right_scaling * dflux_dur;
-
-                let dright_transformed_flux_dx = -(&ArrayView1::from(&dright_scaling_dx)
-                    * num_flux
-                    + &ArrayView1::from(&dflux_dright_x) * right_scaling);
-                let dright_transformed_flux_dy = -(&ArrayView1::from(&dright_scaling_dy)
-                    * num_flux
-                    + &ArrayView1::from(&dflux_dright_y) * right_scaling);
-
-                let left_itest_func = basis.nodes_along_edges[(local_ids[0], i)];
-                let right_itest_func = basis.nodes_along_edges[(local_ids[1], nedge_basis - 1 - i)];
-
-                residuals[(ilelem, left_itest_func)] +=
-                    0.5 * left_edge_length * edge_weights[i] * left_transformed_flux;
-                residuals[(irelem, right_itest_func)] +=
-                    0.5 * right_edge_length * edge_weights[i] * right_transformed_flux;
-
-                let row_idx_left = ilelem * ncell_basis + left_itest_func;
-                let row_idx_right = irelem * ncell_basis + right_itest_func;
-                if is_enriched {
-                    // derivatives w.r.t. left value
-                    for (j, &isol_node) in sol_nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .indexed_iter()
-                    {
-                        let col_idx = ilelem * unenriched_ncell_basis + isol_node;
-                        dsol[(row_idx_left, col_idx)] += 0.5
-                            * left_edge_length
-                            * edge_weights[i]
-                            * self.interp_node_to_enriched_quadrature()[(i, j)]
-                            * dleft_transformed_flux_dul;
-                        dsol[(row_idx_right, col_idx)] += 0.5
-                            * right_edge_length
-                            * edge_weights[i]
-                            * self.interp_node_to_enriched_quadrature()[(i, j)]
-                            * dright_transformed_flux_dul;
-                    }
-                    // derivatives w.r.t. right value
-                    for (j, &isol_node) in sol_nodes_along_edges
+                let right_eta_slice = basis.s.select(
+                    Axis(0),
+                    nodes_along_edges
                         .slice(s![local_ids[1], ..])
-                        .indexed_iter()
-                    {
-                        let col_idx = irelem * unenriched_ncell_basis + isol_node;
-                        dsol[(row_idx_left, col_idx)] += 0.5
-                            * left_edge_length
-                            * edge_weights[i]
-                            * self.interp_node_to_enriched_quadrature()[(nedge_basis - 1 - i, j)]
-                            * dleft_transformed_flux_dur;
-                        dsol[(row_idx_right, col_idx)] += 0.5
+                        .as_slice()
+                        .unwrap(),
+                );
+                for i in 0..nedge_basis {
+                    let left_value = left_sol_slice[i];
+                    let right_value = right_sol_slice[nedge_basis - 1 - i];
+                    let mut dflux_dleft_x = [0.0; 3];
+                    let mut dflux_dleft_y = [0.0; 3];
+                    let mut dflux_dright_x = [0.0; 3];
+                    let mut dflux_dright_y = [0.0; 3];
+                    let (
+                        num_flux,
+                        dflux_dul,
+                        dflux_dur,
+                        dflux_dx0,
+                        dflux_dx1,
+                        dflux_dy0,
+                        dflux_dy1,
+                    ): (f64, f64, f64, f64, f64, f64, f64) = self.dnum_flux(
+                        left_value,
+                        right_value,
+                        left_x_slice[local_ids[0]],
+                        left_x_slice[(local_ids[0] + 1) % 3],
+                        left_y_slice[local_ids[0]],
+                        left_y_slice[(local_ids[0] + 1) % 3],
+                        1.0,
+                    );
+                    dflux_dleft_x[local_ids[0]] = dflux_dx0;
+                    dflux_dleft_x[(local_ids[0] + 1) % 3] = dflux_dx1;
+                    dflux_dleft_y[local_ids[0]] = dflux_dy0;
+                    dflux_dleft_y[(local_ids[0] + 1) % 3] = dflux_dy1;
+                    dflux_dright_x[local_ids[1]] = dflux_dx1;
+                    dflux_dright_x[(local_ids[1] + 1) % 3] = dflux_dx0;
+                    dflux_dright_y[local_ids[1]] = dflux_dy1;
+                    dflux_dright_y[(local_ids[1] + 1) % 3] = dflux_dy0;
+
+                    let mut dleft_scaling_dx = [0.0; 3];
+                    let mut dleft_scaling_dy = [0.0; 3];
+                    let mut dright_scaling_dx = [0.0; 3];
+                    let mut dright_scaling_dy = [0.0; 3];
+                    let left_scaling: f64 = self.dscaling(
+                        left_xi_slice[i],
+                        left_eta_slice[i],
+                        left_ref_normal,
+                        left_x_slice.as_slice(),
+                        dleft_scaling_dx.as_mut_slice(),
+                        left_y_slice.as_slice(),
+                        dleft_scaling_dy.as_mut_slice(),
+                        1.0,
+                    );
+                    let right_scaling: f64 = self.dscaling(
+                        right_xi_slice[nedge_basis - 1 - i],
+                        right_eta_slice[nedge_basis - 1 - i],
+                        right_ref_normal,
+                        right_x_slice.as_slice(),
+                        dright_scaling_dx.as_mut_slice(),
+                        right_y_slice.as_slice(),
+                        dright_scaling_dy.as_mut_slice(),
+                        1.0,
+                    );
+
+                    let left_transformed_flux = num_flux * left_scaling;
+                    let right_transformed_flux = -num_flux * right_scaling;
+
+                    let dleft_transformed_flux_dul = left_scaling * dflux_dul;
+                    let dleft_transformed_flux_dur = left_scaling * dflux_dur;
+
+                    let dleft_transformed_flux_dx = &ArrayView1::from(&dleft_scaling_dx) * num_flux
+                        + &ArrayView1::from(&dflux_dleft_x) * left_scaling;
+                    let dleft_transformed_flux_dy = &ArrayView1::from(&dleft_scaling_dy) * num_flux
+                        + &ArrayView1::from(&dflux_dleft_y) * left_scaling;
+
+                    let dright_transformed_flux_dul = -right_scaling * dflux_dul;
+                    let dright_transformed_flux_dur = -right_scaling * dflux_dur;
+
+                    let dright_transformed_flux_dx = -(&ArrayView1::from(&dright_scaling_dx)
+                        * num_flux
+                        + &ArrayView1::from(&dflux_dright_x) * right_scaling);
+                    let dright_transformed_flux_dy = -(&ArrayView1::from(&dright_scaling_dy)
+                        * num_flux
+                        + &ArrayView1::from(&dflux_dright_y) * right_scaling);
+
+                    let left_itest_func = basis.nodes_along_edges[(local_ids[0], i)];
+                    let right_itest_func =
+                        basis.nodes_along_edges[(local_ids[1], nedge_basis - 1 - i)];
+
+                    residuals[(ilelem, left_itest_func)] +=
+                        0.5 * left_edge_length * edge_weights[i] * left_transformed_flux;
+                    residuals[(irelem, right_itest_func)] +=
+                        0.5 * right_edge_length * edge_weights[i] * right_transformed_flux;
+
+                    let row_idx_left = ilelem * ncell_basis + left_itest_func;
+                    let row_idx_right = irelem * ncell_basis + right_itest_func;
+                    if is_enriched {
+                        // derivatives w.r.t. left value
+                        for (j, &isol_node) in sol_nodes_along_edges
+                            .slice(s![local_ids[0], ..])
+                            .indexed_iter()
+                        {
+                            let col_idx = ilelem * unenriched_ncell_basis + isol_node;
+                            dsol[(row_idx_left, col_idx)] += 0.5
+                                * left_edge_length
+                                * edge_weights[i]
+                                * self.interp_node_to_enriched_quadrature()[(i, j)]
+                                * dleft_transformed_flux_dul;
+                            dsol[(row_idx_right, col_idx)] += 0.5
+                                * right_edge_length
+                                * edge_weights[i]
+                                * self.interp_node_to_enriched_quadrature()[(i, j)]
+                                * dright_transformed_flux_dul;
+                        }
+                        // derivatives w.r.t. right value
+                        for (j, &isol_node) in sol_nodes_along_edges
+                            .slice(s![local_ids[1], ..])
+                            .indexed_iter()
+                        {
+                            let col_idx = irelem * unenriched_ncell_basis + isol_node;
+                            dsol[(row_idx_left, col_idx)] += 0.5
+                                * left_edge_length
+                                * edge_weights[i]
+                                * self.interp_node_to_enriched_quadrature()
+                                    [(nedge_basis - 1 - i, j)]
+                                * dleft_transformed_flux_dur;
+                            dsol[(row_idx_right, col_idx)] += 0.5
+                                * right_edge_length
+                                * edge_weights[i]
+                                * self.interp_node_to_enriched_quadrature()
+                                    [(nedge_basis - 1 - i, j)]
+                                * dright_transformed_flux_dur;
+                        }
+                    } else {
+                        let left_sol_nodes = sol_nodes_along_edges.slice(s![local_ids[0], ..]);
+                        let right_sol_nodes = sol_nodes_along_edges.slice(s![local_ids[1], ..]);
+                        let col_idx_left = ilelem * ncell_basis + left_sol_nodes[i];
+                        let col_idx_right =
+                            irelem * ncell_basis + right_sol_nodes[nedge_basis - 1 - i];
+                        // derivatives w.r.t. left value
+                        dsol[(row_idx_left, col_idx_left)] +=
+                            0.5 * left_edge_length * edge_weights[i] * dleft_transformed_flux_dul;
+                        dsol[(row_idx_right, col_idx_left)] +=
+                            0.5 * right_edge_length * edge_weights[i] * dright_transformed_flux_dul;
+                        // derivatives w.r.t. right value
+                        dsol[(row_idx_left, col_idx_right)] +=
+                            0.5 * left_edge_length * edge_weights[i] * dleft_transformed_flux_dur;
+                        dsol[(row_idx_right, col_idx_right)] +=
+                            0.5 * right_edge_length * edge_weights[i] * dright_transformed_flux_dur;
+                    }
+                    for j in 0..3 {
+                        dx[(row_idx_left, left_elem.inodes[j])] +=
+                            0.5 * left_edge_length * edge_weights[i] * dleft_transformed_flux_dx[j];
+                        dy[(row_idx_left, left_elem.inodes[j])] +=
+                            0.5 * left_edge_length * edge_weights[i] * dleft_transformed_flux_dy[j];
+                        dx[(row_idx_right, right_elem.inodes[j])] += 0.5
                             * right_edge_length
                             * edge_weights[i]
-                            * self.interp_node_to_enriched_quadrature()[(nedge_basis - 1 - i, j)]
-                            * dright_transformed_flux_dur;
+                            * dright_transformed_flux_dx[j];
+                        dy[(row_idx_right, right_elem.inodes[j])] += 0.5
+                            * right_edge_length
+                            * edge_weights[i]
+                            * dright_transformed_flux_dy[j];
                     }
-                } else {
-                    let left_sol_nodes = sol_nodes_along_edges.slice(s![local_ids[0], ..]);
-                    let right_sol_nodes = sol_nodes_along_edges.slice(s![local_ids[1], ..]);
-                    let col_idx_left = ilelem * ncell_basis + left_sol_nodes[i];
-                    let col_idx_right = irelem * ncell_basis + right_sol_nodes[nedge_basis - 1 - i];
-                    // derivatives w.r.t. left value
-                    dsol[(row_idx_left, col_idx_left)] +=
-                        0.5 * left_edge_length * edge_weights[i] * dleft_transformed_flux_dul;
-                    dsol[(row_idx_right, col_idx_left)] +=
-                        0.5 * right_edge_length * edge_weights[i] * dright_transformed_flux_dul;
-                    // derivatives w.r.t. right value
-                    dsol[(row_idx_left, col_idx_right)] +=
-                        0.5 * left_edge_length * edge_weights[i] * dleft_transformed_flux_dur;
-                    dsol[(row_idx_right, col_idx_right)] +=
-                        0.5 * right_edge_length * edge_weights[i] * dright_transformed_flux_dur;
-                }
-                for j in 0..3 {
-                    dx[(row_idx_left, left_elem.inodes[j])] +=
-                        0.5 * left_edge_length * edge_weights[i] * dleft_transformed_flux_dx[j];
-                    dy[(row_idx_left, left_elem.inodes[j])] +=
-                        0.5 * left_edge_length * edge_weights[i] * dleft_transformed_flux_dy[j];
-                    dx[(row_idx_right, right_elem.inodes[j])] +=
-                        0.5 * right_edge_length * edge_weights[i] * dright_transformed_flux_dx[j];
-                    dy[(row_idx_right, right_elem.inodes[j])] +=
-                        0.5 * right_edge_length * edge_weights[i] * dright_transformed_flux_dy[j];
                 }
             }
         }
@@ -855,122 +883,125 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
             let iedges = &bnd.iedges;
             let bnd_value = bnd.value;
             for &iedge in iedges {
-                let edge = &mesh.edges[iedge];
-                let ielem = edge.parents[0];
-                let elem = &mesh.elements[ielem];
-                let inodes = &elem.inodes;
-                let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
-                let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
-                let sol_nodes_along_edges = &self.basis().nodes_along_edges;
-                let nodes_along_edges = &basis.nodes_along_edges;
-                let local_ids = &edge.local_ids;
-                let ref_normal = Self::compute_ref_normal(local_ids[0]);
-                let edge_length = Self::compute_ref_edge_length(local_ids[0]);
-                let sol_slice = {
-                    let sol_slice = solutions.slice(s![ielem, ..]).select(
+                if let Status::Active(edge) = &mesh.edges[iedge] {
+                    let ielem = edge.parents[0];
+                    let elem = mesh.elements[ielem].as_ref();
+                    let inodes = &elem.inodes;
+                    let x_slice: [f64; 3] =
+                        std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().x);
+                    let y_slice: [f64; 3] =
+                        std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().y);
+                    let sol_nodes_along_edges = &self.basis().nodes_along_edges;
+                    let nodes_along_edges = &basis.nodes_along_edges;
+                    let local_ids = &edge.local_ids;
+                    let ref_normal = Self::compute_ref_normal(local_ids[0]);
+                    let edge_length = Self::compute_ref_edge_length(local_ids[0]);
+                    let sol_slice = {
+                        let sol_slice = solutions.slice(s![ielem, ..]).select(
+                            Axis(0),
+                            sol_nodes_along_edges
+                                .slice(s![local_ids[0], ..])
+                                .as_slice()
+                                .unwrap(),
+                        );
+                        if is_enriched {
+                            self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                        } else {
+                            sol_slice
+                        }
+                    };
+                    let xi_slice = basis.r.select(
                         Axis(0),
-                        sol_nodes_along_edges
+                        nodes_along_edges
                             .slice(s![local_ids[0], ..])
                             .as_slice()
                             .unwrap(),
                     );
-                    if is_enriched {
-                        self.interp_node_to_enriched_quadrature().dot(&sol_slice)
-                    } else {
-                        sol_slice
-                    }
-                };
-                let xi_slice = basis.r.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                let eta_slice = basis.s.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                for i in 0..nedge_basis {
-                    let xi = xi_slice[i];
-                    let eta = eta_slice[i];
-                    let (boundary_flux, dflux_du, dflux_dx0, dflux_dx1, dflux_dy0, dflux_dy1): (
-                        f64,
-                        f64,
-                        f64,
-                        f64,
-                        f64,
-                        f64,
-                    ) = self.dbnd_flux(
-                        sol_slice[i],
-                        bnd_value,
-                        x_slice[local_ids[0]],
-                        x_slice[(local_ids[0] + 1) % 3],
-                        y_slice[local_ids[0]],
-                        y_slice[(local_ids[0] + 1) % 3],
-                        1.0,
-                    );
-
-                    let mut dflux_dx = [0.0; 3];
-                    let mut dflux_dy = [0.0; 3];
-                    dflux_dx[local_ids[0]] = dflux_dx0;
-                    dflux_dx[(local_ids[0] + 1) % 3] = dflux_dx1;
-                    dflux_dy[local_ids[0]] = dflux_dy0;
-                    dflux_dy[(local_ids[0] + 1) % 3] = dflux_dy1;
-
-                    let mut dscaling_dx = [0.0; 3];
-                    let mut dscaling_dy = [0.0; 3];
-                    let scaling: f64 = self.dscaling(
-                        xi,
-                        eta,
-                        ref_normal,
-                        &x_slice,
-                        dscaling_dx.as_mut_slice(),
-                        &y_slice,
-                        dscaling_dy.as_mut_slice(),
-                        1.0,
-                    );
-                    let transformed_flux = boundary_flux * scaling;
-
-                    let dtransformed_flux_du = dflux_du * scaling;
-                    let dtransformed_flux_dx = &(&ArrayView1::from(&dflux_dx) * scaling)
-                        + &(&ArrayView1::from(&dscaling_dx) * boundary_flux);
-                    let dtransformed_flux_dy = &(&ArrayView1::from(&dflux_dy) * scaling)
-                        + &(&ArrayView1::from(&dscaling_dy) * boundary_flux);
-
-                    let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
-
-                    residuals[(ielem, itest_func)] +=
-                        0.5 * edge_length * edge_weights[i] * transformed_flux;
-
-                    let row_idx = ielem * ncell_basis + itest_func;
-                    for j in 0..3 {
-                        dx[(row_idx, inodes[j])] +=
-                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_dx[j];
-                        dy[(row_idx, inodes[j])] +=
-                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_dy[j];
-                    }
-
-                    if is_enriched {
-                        for (j, &isol_node) in sol_nodes_along_edges
+                    let eta_slice = basis.s.select(
+                        Axis(0),
+                        nodes_along_edges
                             .slice(s![local_ids[0], ..])
-                            .indexed_iter()
-                        {
-                            let col_idx = ielem * unenriched_ncell_basis + isol_node;
-                            dsol[(row_idx, col_idx)] += 0.5
-                                * edge_length
-                                * edge_weights[i]
-                                * self.interp_node_to_enriched_quadrature()[(i, j)]
-                                * dtransformed_flux_du;
+                            .as_slice()
+                            .unwrap(),
+                    );
+                    for i in 0..nedge_basis {
+                        let xi = xi_slice[i];
+                        let eta = eta_slice[i];
+                        let (boundary_flux, dflux_du, dflux_dx0, dflux_dx1, dflux_dy0, dflux_dy1): (
+                            f64,
+                            f64,
+                            f64,
+                            f64,
+                            f64,
+                            f64,
+                        ) = self.dbnd_flux(
+                            sol_slice[i],
+                            bnd_value,
+                            x_slice[local_ids[0]],
+                            x_slice[(local_ids[0] + 1) % 3],
+                            y_slice[local_ids[0]],
+                            y_slice[(local_ids[0] + 1) % 3],
+                            1.0,
+                        );
+
+                        let mut dflux_dx = [0.0; 3];
+                        let mut dflux_dy = [0.0; 3];
+                        dflux_dx[local_ids[0]] = dflux_dx0;
+                        dflux_dx[(local_ids[0] + 1) % 3] = dflux_dx1;
+                        dflux_dy[local_ids[0]] = dflux_dy0;
+                        dflux_dy[(local_ids[0] + 1) % 3] = dflux_dy1;
+
+                        let mut dscaling_dx = [0.0; 3];
+                        let mut dscaling_dy = [0.0; 3];
+                        let scaling: f64 = self.dscaling(
+                            xi,
+                            eta,
+                            ref_normal,
+                            &x_slice,
+                            dscaling_dx.as_mut_slice(),
+                            &y_slice,
+                            dscaling_dy.as_mut_slice(),
+                            1.0,
+                        );
+                        let transformed_flux = boundary_flux * scaling;
+
+                        let dtransformed_flux_du = dflux_du * scaling;
+                        let dtransformed_flux_dx = &(&ArrayView1::from(&dflux_dx) * scaling)
+                            + &(&ArrayView1::from(&dscaling_dx) * boundary_flux);
+                        let dtransformed_flux_dy = &(&ArrayView1::from(&dflux_dy) * scaling)
+                            + &(&ArrayView1::from(&dscaling_dy) * boundary_flux);
+
+                        let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
+
+                        residuals[(ielem, itest_func)] +=
+                            0.5 * edge_length * edge_weights[i] * transformed_flux;
+
+                        let row_idx = ielem * ncell_basis + itest_func;
+                        for j in 0..3 {
+                            dx[(row_idx, inodes[j])] +=
+                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_dx[j];
+                            dy[(row_idx, inodes[j])] +=
+                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_dy[j];
                         }
-                    } else {
-                        let sol_nodes = sol_nodes_along_edges.slice(s![local_ids[0], ..]);
-                        let col_idx = ielem * ncell_basis + sol_nodes[i];
-                        dsol[(row_idx, col_idx)] +=
-                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_du;
+
+                        if is_enriched {
+                            for (j, &isol_node) in sol_nodes_along_edges
+                                .slice(s![local_ids[0], ..])
+                                .indexed_iter()
+                            {
+                                let col_idx = ielem * unenriched_ncell_basis + isol_node;
+                                dsol[(row_idx, col_idx)] += 0.5
+                                    * edge_length
+                                    * edge_weights[i]
+                                    * self.interp_node_to_enriched_quadrature()[(i, j)]
+                                    * dtransformed_flux_du;
+                            }
+                        } else {
+                            let sol_nodes = sol_nodes_along_edges.slice(s![local_ids[0], ..]);
+                            let col_idx = ielem * ncell_basis + sol_nodes[i];
+                            dsol[(row_idx, col_idx)] +=
+                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_du;
+                        }
                     }
                 }
             }
@@ -980,184 +1011,183 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
             let iedges = &bnd.iedges;
             let nodal_coeffs = &bnd.nodal_coeffs;
             for &iedge in iedges {
-                let edge = &mesh.edges[iedge];
-                let ielem = edge.parents[0];
-                let elem = &mesh.elements[ielem];
-                let inodes = &elem.inodes;
-                let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
-                let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
-                let sol_nodes_along_edges = &self.basis().nodes_along_edges;
-                let nodes_along_edges = &basis.nodes_along_edges;
-                let local_ids = &edge.local_ids;
-                let ref_normal = Self::compute_ref_normal(local_ids[0]);
-                let edge_length = Self::compute_ref_edge_length(local_ids[0]);
-                let sol_slice = {
-                    let sol_slice = solutions.slice(s![ielem, ..]).select(
+                if let Status::Active(edge) = &mesh.edges[iedge] {
+                    let ielem = edge.parents[0];
+                    let elem = mesh.elements[ielem].as_ref();
+                    let inodes = &elem.inodes;
+                    let x_slice: [f64; 3] =
+                        std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().x);
+                    let y_slice: [f64; 3] =
+                        std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().y);
+                    let sol_nodes_along_edges = &self.basis().nodes_along_edges;
+                    let nodes_along_edges = &basis.nodes_along_edges;
+                    let local_ids = &edge.local_ids;
+                    let ref_normal = Self::compute_ref_normal(local_ids[0]);
+                    let edge_length = Self::compute_ref_edge_length(local_ids[0]);
+                    let sol_slice = {
+                        let sol_slice = solutions.slice(s![ielem, ..]).select(
+                            Axis(0),
+                            sol_nodes_along_edges
+                                .slice(s![local_ids[0], ..])
+                                .as_slice()
+                                .unwrap(),
+                        );
+                        if is_enriched {
+                            self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                        } else {
+                            sol_slice
+                        }
+                    };
+                    let xi_slice = basis.r.select(
                         Axis(0),
-                        sol_nodes_along_edges
+                        nodes_along_edges
                             .slice(s![local_ids[0], ..])
                             .as_slice()
                             .unwrap(),
                     );
-                    if is_enriched {
-                        self.interp_node_to_enriched_quadrature().dot(&sol_slice)
-                    } else {
-                        sol_slice
-                    }
-                };
-                let xi_slice = basis.r.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                let eta_slice = basis.s.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                let (coord0, coord1) = match bnd.position {
-                    BoundaryPosition::Lower => {
-                        (mesh.nodes[edge.inodes[0]].x, mesh.nodes[edge.inodes[1]].x)
-                    }
-                    BoundaryPosition::Right => {
-                        (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y)
-                    }
-                    BoundaryPosition::Left => {
-                        (mesh.nodes[edge.inodes[0]].y, mesh.nodes[edge.inodes[1]].y)
-                    }
-                    _ => panic!("Invalid boundary normal"),
-                };
-                let bnd_values = compute_boundary_value_by_interpolation(
-                    &nodal_coeffs,
-                    self.basis().basis1d.n,
-                    &basis.basis1d.xi,
-                    &self.basis().basis1d.inv_vandermonde,
-                    coord0,
-                    coord1,
-                );
-
-                let bnd_values_coord0_perturbed = compute_boundary_value_by_interpolation(
-                    &nodal_coeffs,
-                    self.basis().basis1d.n,
-                    &basis.basis1d.xi,
-                    &self.basis().basis1d.inv_vandermonde,
-                    coord0 + 1e-6,
-                    coord1,
-                );
-                let bnd_values_coord1_perturbed = compute_boundary_value_by_interpolation(
-                    &nodal_coeffs,
-                    self.basis().basis1d.n,
-                    &basis.basis1d.xi,
-                    &self.basis().basis1d.inv_vandermonde,
-                    coord0,
-                    coord1 + 1e-6,
-                );
-                let (dbnd_values_dx0, dbnd_values_dx1, dbnd_values_dy0, dbnd_values_dy1) =
-                    match bnd.position {
-                        BoundaryPosition::Lower => (
-                            (&bnd_values_coord0_perturbed - &bnd_values) / 1e-6,
-                            (&bnd_values_coord1_perturbed - &bnd_values) / 1e-6,
-                            Array1::zeros(basis.basis1d.n + 1),
-                            Array1::zeros(basis.basis1d.n + 1),
-                        ),
-                        BoundaryPosition::Right => (
-                            Array1::zeros(basis.basis1d.n + 1),
-                            Array1::zeros(basis.basis1d.n + 1),
-                            (&bnd_values_coord0_perturbed - &bnd_values) / 1e-6,
-                            (&bnd_values_coord1_perturbed - &bnd_values) / 1e-6,
-                        ),
-                        BoundaryPosition::Left => (
-                            Array1::zeros(basis.basis1d.n + 1),
-                            Array1::zeros(basis.basis1d.n + 1),
-                            (&bnd_values_coord0_perturbed - &bnd_values) / 1e-6,
-                            (&bnd_values_coord1_perturbed - &bnd_values) / 1e-6,
-                        ),
+                    let eta_slice = basis.s.select(
+                        Axis(0),
+                        nodes_along_edges
+                            .slice(s![local_ids[0], ..])
+                            .as_slice()
+                            .unwrap(),
+                    );
+                    let n0 = mesh.nodes[edge.inodes[local_ids[0]]].as_ref();
+                    let n1 = mesh.nodes[edge.inodes[(local_ids[0] + 1) % 3]].as_ref();
+                    let (coord0, coord1) = match bnd.position {
+                        BoundaryPosition::Lower => (n0.x, n1.x),
+                        BoundaryPosition::Right => (n0.y, n1.y),
+                        BoundaryPosition::Left => (n0.y, n1.y),
                         _ => panic!("Invalid boundary normal"),
                     };
-
-                for i in 0..nedge_basis {
-                    let xi = xi_slice[i];
-                    let eta = eta_slice[i];
-                    let (
-                        boundary_flux,
-                        dflux_du,
-                        dflux_dbnd_value,
-                        dflux_dx0,
-                        dflux_dx1,
-                        dflux_dy0,
-                        dflux_dy1,
-                    ): (f64, f64, f64, f64, f64, f64, f64) = self.dnum_flux(
-                        sol_slice[i],
-                        bnd_values[i],
-                        x_slice[local_ids[0]],
-                        x_slice[(local_ids[0] + 1) % 3],
-                        y_slice[local_ids[0]],
-                        y_slice[(local_ids[0] + 1) % 3],
-                        1.0,
+                    let bnd_values = compute_boundary_value_by_interpolation(
+                        &nodal_coeffs,
+                        self.basis().basis1d.n,
+                        &basis.basis1d.xi,
+                        &self.basis().basis1d.inv_vandermonde,
+                        coord0,
+                        coord1,
                     );
-                    let mut dflux_dx = [0.0; 3];
-                    let mut dflux_dy = [0.0; 3];
-                    dflux_dx[local_ids[0]] = dflux_dx0 + dflux_dbnd_value * dbnd_values_dx0[i];
-                    dflux_dx[(local_ids[0] + 1) % 3] =
-                        dflux_dx1 + dflux_dbnd_value * dbnd_values_dx1[i];
-                    dflux_dy[local_ids[0]] = dflux_dy0 + dflux_dbnd_value * dbnd_values_dy0[i];
-                    dflux_dy[(local_ids[0] + 1) % 3] =
-                        dflux_dy1 + dflux_dbnd_value * dbnd_values_dy1[i];
 
-                    let mut dscaling_dx = [0.0; 3];
-                    let mut dscaling_dy = [0.0; 3];
-                    let scaling: f64 = self.dscaling(
-                        xi,
-                        eta,
-                        ref_normal,
-                        &x_slice,
-                        dscaling_dx.as_mut_slice(),
-                        &y_slice,
-                        dscaling_dy.as_mut_slice(),
-                        1.0,
+                    let bnd_values_coord0_perturbed = compute_boundary_value_by_interpolation(
+                        &nodal_coeffs,
+                        self.basis().basis1d.n,
+                        &basis.basis1d.xi,
+                        &self.basis().basis1d.inv_vandermonde,
+                        coord0 + 1e-6,
+                        coord1,
                     );
-                    let transformed_flux = boundary_flux * scaling;
+                    let bnd_values_coord1_perturbed = compute_boundary_value_by_interpolation(
+                        &nodal_coeffs,
+                        self.basis().basis1d.n,
+                        &basis.basis1d.xi,
+                        &self.basis().basis1d.inv_vandermonde,
+                        coord0,
+                        coord1 + 1e-6,
+                    );
+                    let (dbnd_values_dx0, dbnd_values_dx1, dbnd_values_dy0, dbnd_values_dy1) =
+                        match bnd.position {
+                            BoundaryPosition::Lower => (
+                                (&bnd_values_coord0_perturbed - &bnd_values) / 1e-6,
+                                (&bnd_values_coord1_perturbed - &bnd_values) / 1e-6,
+                                Array1::zeros(basis.basis1d.n + 1),
+                                Array1::zeros(basis.basis1d.n + 1),
+                            ),
+                            BoundaryPosition::Right => (
+                                Array1::zeros(basis.basis1d.n + 1),
+                                Array1::zeros(basis.basis1d.n + 1),
+                                (&bnd_values_coord0_perturbed - &bnd_values) / 1e-6,
+                                (&bnd_values_coord1_perturbed - &bnd_values) / 1e-6,
+                            ),
+                            BoundaryPosition::Left => (
+                                Array1::zeros(basis.basis1d.n + 1),
+                                Array1::zeros(basis.basis1d.n + 1),
+                                (&bnd_values_coord0_perturbed - &bnd_values) / 1e-6,
+                                (&bnd_values_coord1_perturbed - &bnd_values) / 1e-6,
+                            ),
+                            _ => panic!("Invalid boundary normal"),
+                        };
 
-                    let dtransformed_flux_du = dflux_du * scaling;
-                    let dtransformed_flux_dx = &(&ArrayView1::from(&dflux_dx) * scaling)
-                        + &(&ArrayView1::from(&dscaling_dx) * boundary_flux);
-                    let dtransformed_flux_dy = &(&ArrayView1::from(&dflux_dy) * scaling)
-                        + &(&ArrayView1::from(&dscaling_dy) * boundary_flux);
+                    for i in 0..nedge_basis {
+                        let xi = xi_slice[i];
+                        let eta = eta_slice[i];
+                        let (
+                            boundary_flux,
+                            dflux_du,
+                            dflux_dbnd_value,
+                            dflux_dx0,
+                            dflux_dx1,
+                            dflux_dy0,
+                            dflux_dy1,
+                        ): (f64, f64, f64, f64, f64, f64, f64) = self.dnum_flux(
+                            sol_slice[i],
+                            bnd_values[i],
+                            x_slice[local_ids[0]],
+                            x_slice[(local_ids[0] + 1) % 3],
+                            y_slice[local_ids[0]],
+                            y_slice[(local_ids[0] + 1) % 3],
+                            1.0,
+                        );
+                        let mut dflux_dx = [0.0; 3];
+                        let mut dflux_dy = [0.0; 3];
+                        dflux_dx[local_ids[0]] = dflux_dx0 + dflux_dbnd_value * dbnd_values_dx0[i];
+                        dflux_dx[(local_ids[0] + 1) % 3] =
+                            dflux_dx1 + dflux_dbnd_value * dbnd_values_dx1[i];
+                        dflux_dy[local_ids[0]] = dflux_dy0 + dflux_dbnd_value * dbnd_values_dy0[i];
+                        dflux_dy[(local_ids[0] + 1) % 3] =
+                            dflux_dy1 + dflux_dbnd_value * dbnd_values_dy1[i];
 
-                    let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
+                        let mut dscaling_dx = [0.0; 3];
+                        let mut dscaling_dy = [0.0; 3];
+                        let scaling: f64 = self.dscaling(
+                            xi,
+                            eta,
+                            ref_normal,
+                            &x_slice,
+                            dscaling_dx.as_mut_slice(),
+                            &y_slice,
+                            dscaling_dy.as_mut_slice(),
+                            1.0,
+                        );
+                        let transformed_flux = boundary_flux * scaling;
 
-                    residuals[(ielem, itest_func)] +=
-                        0.5 * edge_length * edge_weights[i] * transformed_flux;
+                        let dtransformed_flux_du = dflux_du * scaling;
+                        let dtransformed_flux_dx = &(&ArrayView1::from(&dflux_dx) * scaling)
+                            + &(&ArrayView1::from(&dscaling_dx) * boundary_flux);
+                        let dtransformed_flux_dy = &(&ArrayView1::from(&dflux_dy) * scaling)
+                            + &(&ArrayView1::from(&dscaling_dy) * boundary_flux);
 
-                    let row_idx = ielem * ncell_basis + itest_func;
-                    for j in 0..3 {
-                        dx[(row_idx, inodes[j])] +=
-                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_dx[j];
-                        dy[(row_idx, inodes[j])] +=
-                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_dy[j];
-                    }
+                        let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
 
-                    if is_enriched {
-                        for (j, &isol_node) in sol_nodes_along_edges
-                            .slice(s![local_ids[0], ..])
-                            .indexed_iter()
-                        {
-                            let col_idx = ielem * unenriched_ncell_basis + isol_node;
-                            dsol[(row_idx, col_idx)] += 0.5
-                                * edge_length
-                                * edge_weights[i]
-                                * self.interp_node_to_enriched_quadrature()[(i, j)]
-                                * dtransformed_flux_du;
+                        residuals[(ielem, itest_func)] +=
+                            0.5 * edge_length * edge_weights[i] * transformed_flux;
+
+                        let row_idx = ielem * ncell_basis + itest_func;
+                        for j in 0..3 {
+                            dx[(row_idx, inodes[j])] +=
+                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_dx[j];
+                            dy[(row_idx, inodes[j])] +=
+                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_dy[j];
                         }
-                    } else {
-                        let sol_nodes = sol_nodes_along_edges.slice(s![local_ids[0], ..]);
-                        let col_idx = ielem * ncell_basis + sol_nodes[i];
-                        dsol[(row_idx, col_idx)] +=
-                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_du;
+
+                        if is_enriched {
+                            for (j, &isol_node) in sol_nodes_along_edges
+                                .slice(s![local_ids[0], ..])
+                                .indexed_iter()
+                            {
+                                let col_idx = ielem * unenriched_ncell_basis + isol_node;
+                                dsol[(row_idx, col_idx)] += 0.5
+                                    * edge_length
+                                    * edge_weights[i]
+                                    * self.interp_node_to_enriched_quadrature()[(i, j)]
+                                    * dtransformed_flux_du;
+                            }
+                        } else {
+                            let sol_nodes = sol_nodes_along_edges.slice(s![local_ids[0], ..]);
+                            let col_idx = ielem * ncell_basis + sol_nodes[i];
+                            dsol[(row_idx, col_idx)] +=
+                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_du;
+                        }
                     }
                 }
             }
@@ -1166,126 +1196,129 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
         for bnd in &mesh.open_bnds {
             let iedges = &bnd.iedges;
             for &iedge in iedges {
-                let edge = &mesh.edges[iedge];
-                let ielem = edge.parents[0];
-                let elem = &mesh.elements[ielem];
-                let inodes = &elem.inodes;
-                let x_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].x);
-                let y_slice: [f64; 3] = std::array::from_fn(|i| mesh.nodes[inodes[i]].y);
-                let sol_nodes_along_edges = &self.basis().nodes_along_edges;
-                let nodes_along_edges = &basis.nodes_along_edges;
-                let local_ids = &edge.local_ids;
-                let ref_normal = Self::compute_ref_normal(local_ids[0]);
-                let edge_length = Self::compute_ref_edge_length(local_ids[0]);
-                let sol_slice = {
-                    let sol_slice = solutions.slice(s![ielem, ..]).select(
+                if let Status::Active(edge) = &mesh.edges[iedge] {
+                    let ielem = edge.parents[0];
+                    let elem = mesh.elements[ielem].as_ref();
+                    let inodes = &elem.inodes;
+                    let x_slice: [f64; 3] =
+                        std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().x);
+                    let y_slice: [f64; 3] =
+                        std::array::from_fn(|i| mesh.nodes[inodes[i]].as_ref().y);
+                    let sol_nodes_along_edges = &self.basis().nodes_along_edges;
+                    let nodes_along_edges = &basis.nodes_along_edges;
+                    let local_ids = &edge.local_ids;
+                    let ref_normal = Self::compute_ref_normal(local_ids[0]);
+                    let edge_length = Self::compute_ref_edge_length(local_ids[0]);
+                    let sol_slice = {
+                        let sol_slice = solutions.slice(s![ielem, ..]).select(
+                            Axis(0),
+                            sol_nodes_along_edges
+                                .slice(s![local_ids[0], ..])
+                                .as_slice()
+                                .unwrap(),
+                        );
+                        if is_enriched {
+                            self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                        } else {
+                            sol_slice
+                        }
+                    };
+                    let xi_slice = basis.r.select(
                         Axis(0),
-                        sol_nodes_along_edges
+                        nodes_along_edges
                             .slice(s![local_ids[0], ..])
                             .as_slice()
                             .unwrap(),
                     );
-                    if is_enriched {
-                        self.interp_node_to_enriched_quadrature().dot(&sol_slice)
-                    } else {
-                        sol_slice
-                    }
-                };
-                let xi_slice = basis.r.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                let eta_slice = basis.s.select(
-                    Axis(0),
-                    nodes_along_edges
-                        .slice(s![local_ids[0], ..])
-                        .as_slice()
-                        .unwrap(),
-                );
-                for i in 0..nedge_basis {
-                    let u = sol_slice[i];
-                    let xi = xi_slice[i];
-                    let eta = eta_slice[i];
-
-                    let (boundary_flux, dflux_du, dflux_dx0, dflux_dx1, dflux_dy0, dflux_dy1): (
-                        f64,
-                        f64,
-                        f64,
-                        f64,
-                        f64,
-                        f64,
-                    ) = self.dopen_bnd_flux(
-                        u,
-                        x_slice[local_ids[0]],
-                        x_slice[(local_ids[0] + 1) % 3],
-                        y_slice[local_ids[0]],
-                        y_slice[(local_ids[0] + 1) % 3],
-                        1.0,
-                    );
-
-                    let mut dflux_dx = [0.0; 3];
-                    let mut dflux_dy = [0.0; 3];
-                    dflux_dx[local_ids[0]] = dflux_dx0;
-                    dflux_dx[(local_ids[0] + 1) % 3] = dflux_dx1;
-                    dflux_dy[local_ids[0]] = dflux_dy0;
-                    dflux_dy[(local_ids[0] + 1) % 3] = dflux_dy1;
-
-                    let mut dscaling_dx = [0.0; 3];
-                    let mut dscaling_dy = [0.0; 3];
-                    let scaling: f64 = self.dscaling(
-                        xi,
-                        eta,
-                        ref_normal,
-                        &x_slice,
-                        dscaling_dx.as_mut_slice(),
-                        &y_slice,
-                        dscaling_dy.as_mut_slice(),
-                        1.0,
-                    );
-                    let transformed_flux = boundary_flux * scaling;
-
-                    let dtransformed_flux_du = dflux_du * scaling;
-                    let dtransformed_flux_dx = &(&ArrayView1::from(&dflux_dx) * scaling)
-                        + &(&ArrayView1::from(&dscaling_dx) * boundary_flux);
-                    let dtransformed_flux_dy = &(&ArrayView1::from(&dflux_dy) * scaling)
-                        + &(&ArrayView1::from(&dscaling_dy) * boundary_flux);
-
-                    let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
-                    if ielem == 1 {
-                        println!("boundary_flux: {:?}", boundary_flux);
-                        println!("transformed_flux: {:?}", transformed_flux);
-                    }
-                    residuals[(ielem, itest_func)] +=
-                        0.5 * edge_length * edge_weights[i] * transformed_flux;
-
-                    let row_idx = ielem * ncell_basis + itest_func;
-                    for j in 0..3 {
-                        dx[(row_idx, inodes[j])] +=
-                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_dx[j];
-                        dy[(row_idx, inodes[j])] +=
-                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_dy[j];
-                    }
-
-                    if is_enriched {
-                        for (j, &isol_node) in sol_nodes_along_edges
+                    let eta_slice = basis.s.select(
+                        Axis(0),
+                        nodes_along_edges
                             .slice(s![local_ids[0], ..])
-                            .indexed_iter()
-                        {
-                            let col_idx = ielem * unenriched_ncell_basis + isol_node;
-                            dsol[(row_idx, col_idx)] += 0.5
-                                * edge_length
-                                * edge_weights[i]
-                                * self.interp_node_to_enriched_quadrature()[(i, j)]
-                                * dtransformed_flux_du;
+                            .as_slice()
+                            .unwrap(),
+                    );
+                    for i in 0..nedge_basis {
+                        let u = sol_slice[i];
+                        let xi = xi_slice[i];
+                        let eta = eta_slice[i];
+
+                        let (boundary_flux, dflux_du, dflux_dx0, dflux_dx1, dflux_dy0, dflux_dy1): (
+                            f64,
+                            f64,
+                            f64,
+                            f64,
+                            f64,
+                            f64,
+                        ) = self.dopen_bnd_flux(
+                            u,
+                            x_slice[local_ids[0]],
+                            x_slice[(local_ids[0] + 1) % 3],
+                            y_slice[local_ids[0]],
+                            y_slice[(local_ids[0] + 1) % 3],
+                            1.0,
+                        );
+
+                        let mut dflux_dx = [0.0; 3];
+                        let mut dflux_dy = [0.0; 3];
+                        dflux_dx[local_ids[0]] = dflux_dx0;
+                        dflux_dx[(local_ids[0] + 1) % 3] = dflux_dx1;
+                        dflux_dy[local_ids[0]] = dflux_dy0;
+                        dflux_dy[(local_ids[0] + 1) % 3] = dflux_dy1;
+
+                        let mut dscaling_dx = [0.0; 3];
+                        let mut dscaling_dy = [0.0; 3];
+                        let scaling: f64 = self.dscaling(
+                            xi,
+                            eta,
+                            ref_normal,
+                            &x_slice,
+                            dscaling_dx.as_mut_slice(),
+                            &y_slice,
+                            dscaling_dy.as_mut_slice(),
+                            1.0,
+                        );
+                        let transformed_flux = boundary_flux * scaling;
+
+                        let dtransformed_flux_du = dflux_du * scaling;
+                        let dtransformed_flux_dx = &(&ArrayView1::from(&dflux_dx) * scaling)
+                            + &(&ArrayView1::from(&dscaling_dx) * boundary_flux);
+                        let dtransformed_flux_dy = &(&ArrayView1::from(&dflux_dy) * scaling)
+                            + &(&ArrayView1::from(&dscaling_dy) * boundary_flux);
+
+                        let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
+                        if ielem == 1 {
+                            println!("boundary_flux: {:?}", boundary_flux);
+                            println!("transformed_flux: {:?}", transformed_flux);
                         }
-                    } else {
-                        let sol_nodes = sol_nodes_along_edges.slice(s![local_ids[0], ..]);
-                        let col_idx = ielem * ncell_basis + sol_nodes[i];
-                        dsol[(row_idx, col_idx)] +=
-                            0.5 * edge_length * edge_weights[i] * dtransformed_flux_du;
+                        residuals[(ielem, itest_func)] +=
+                            0.5 * edge_length * edge_weights[i] * transformed_flux;
+
+                        let row_idx = ielem * ncell_basis + itest_func;
+                        for j in 0..3 {
+                            dx[(row_idx, inodes[j])] +=
+                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_dx[j];
+                            dy[(row_idx, inodes[j])] +=
+                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_dy[j];
+                        }
+
+                        if is_enriched {
+                            for (j, &isol_node) in sol_nodes_along_edges
+                                .slice(s![local_ids[0], ..])
+                                .indexed_iter()
+                            {
+                                let col_idx = ielem * unenriched_ncell_basis + isol_node;
+                                dsol[(row_idx, col_idx)] += 0.5
+                                    * edge_length
+                                    * edge_weights[i]
+                                    * self.interp_node_to_enriched_quadrature()[(i, j)]
+                                    * dtransformed_flux_du;
+                            }
+                        } else {
+                            let sol_nodes = sol_nodes_along_edges.slice(s![local_ids[0], ..]);
+                            let col_idx = ielem * ncell_basis + sol_nodes[i];
+                            dsol[(row_idx, col_idx)] +=
+                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_du;
+                        }
                     }
                 }
             }
@@ -1415,7 +1448,7 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
         let mut bnd_solutions = Array2::zeros((n_bnd_edges, nedge_basis));
 
         for (i, &iedge) in iedges.iter().enumerate() {
-            let edge = &mesh.edges[iedge];
+            let edge = mesh.edges[iedge].as_ref();
             let ielem = edge.parents[0];
             let local_edge_id = edge.local_ids[0];
             let element_sols = solutions.slice(s![ielem, ..]);
