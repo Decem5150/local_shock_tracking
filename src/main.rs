@@ -15,6 +15,7 @@ use crate::disc::burgers1d_space_time::Disc1dBurgers1dSpaceTime;
 use crate::disc::mesh::mesh2d::Mesh2d;
 use crate::disc::{SQP, SpaceTimeSolver1DScalar};
 use crate::initialization::initialize_mesh1d;
+use crate::io::write_to_vtu::write_nodal_solutions;
 fn main() {
     /*
     let solver_params = initialization::initialize_params_by_file("inputs/solverparam.json");
@@ -47,17 +48,10 @@ fn main() {
     let basis = TriangleBasis::new(solver_params.polynomial_order);
     let enriched_basis = TriangleBasis::new(solver_params.polynomial_order + 1);
     let mut mesh =
-        Mesh2d::create_tri_mesh(4, 3, 0.0, 1.2, 0.0, 1.0, solver_params.polynomial_order);
-    mesh.nodes[6].as_mut().x = 0.41;
-    dbg!(&mesh.nodes[6]);
-    mesh.print_free_node_coords();
-    mesh.collapse_small_elements(0.1);
-    mesh.print_free_node_coords();
-    dbg!(&mesh.nodes[6]);
-    /*
+        Mesh2d::create_tri_mesh(5, 5, 0.0, 1.0, 0.0, 1.0, solver_params.polynomial_order);
+
     let disc = Disc1dBurgers1dSpaceTime::new(basis, enriched_basis, &solver_params);
     let mut solutions = Array2::<f64>::zeros((mesh.elem_num, disc.basis.r.len()));
     disc.initialize_solution(solutions.view_mut());
-    disc.solve(&mut mesh, solutions.view_mut());
-    */
+    disc.solve(&mut mesh, &mut solutions);
 }

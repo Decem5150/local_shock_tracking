@@ -188,8 +188,7 @@ impl<'a> Disc1dBurgers<'a> {
                         ));
                         self.shock_tracker
                             .initialize_solution(local_solutions.view_mut());
-                        self.shock_tracker
-                            .solve(&mut submesh, local_solutions.view_mut());
+                        self.shock_tracker.solve(&mut submesh, &mut local_solutions);
                         sub_solutions.push(local_solutions);
                         sub_meshes.push(submesh);
 
@@ -389,7 +388,7 @@ impl<'a> Disc1dBurgers<'a> {
                 local_sols in &mut sub_solutions,
             )
                 {
-                    self.shock_tracker.solve(submesh, local_sols.view_mut());
+                    self.shock_tracker.solve(submesh, local_sols);
                 }
             );
 
