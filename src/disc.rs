@@ -389,9 +389,9 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                     let right_itest_func =
                         basis.nodes_along_edges[(local_ids[1], nedge_basis - 1 - i)];
                     residuals[(ilelem, left_itest_func)] +=
-                        0.5 * left_edge_length * edge_weights[i] * left_transformed_flux;
+                        left_edge_length * edge_weights[i] * left_transformed_flux;
                     residuals[(irelem, right_itest_func)] +=
-                        0.5 * right_edge_length * edge_weights[i] * right_transformed_flux;
+                        right_edge_length * edge_weights[i] * right_transformed_flux;
                 }
             }
         }
@@ -457,7 +457,7 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         let transformed_flux = boundary_flux * scaling;
                         let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
                         residuals[(ielem, itest_func)] +=
-                            0.5 * edge_length * edge_weights[i] * transformed_flux;
+                            edge_length * edge_weights[i] * transformed_flux;
                     }
                 }
             }
@@ -538,7 +538,7 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         let transformed_flux = boundary_flux * scaling;
                         let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
                         residuals[(ielem, itest_func)] +=
-                            0.5 * edge_length * edge_weights[i] * transformed_flux;
+                            edge_length * edge_weights[i] * transformed_flux;
                     }
                 }
             }
@@ -624,7 +624,7 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         let transformed_flux = boundary_flux * scaling;
                         let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
                         residuals[(ielem, itest_func)] +=
-                            0.5 * edge_length * edge_weights[i] * transformed_flux;
+                            edge_length * edge_weights[i] * transformed_flux;
                     }
                 }
             }
@@ -691,7 +691,7 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         let transformed_flux = boundary_flux * scaling;
                         let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
                         residuals[(ielem, itest_func)] +=
-                            0.5 * edge_length * edge_weights[i] * transformed_flux;
+                            edge_length * edge_weights[i] * transformed_flux;
                     }
                 }
             }
@@ -918,9 +918,9 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         basis.nodes_along_edges[(local_ids[1], nedge_basis - 1 - i)];
 
                     residuals[(ilelem, left_itest_func)] +=
-                        0.5 * left_edge_length * edge_weights[i] * left_transformed_flux;
+                        left_edge_length * edge_weights[i] * left_transformed_flux;
                     residuals[(irelem, right_itest_func)] +=
-                        0.5 * right_edge_length * edge_weights[i] * right_transformed_flux;
+                        right_edge_length * edge_weights[i] * right_transformed_flux;
 
                     if is_enriched {
                         // derivatives w.r.t. left value
@@ -962,28 +962,24 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         let right_sol_nodes = sol_nodes_along_edges.slice(s![local_ids[1], ..]);
                         // derivatives w.r.t. left value
                         dsol[(ilelem, left_itest_func, ilelem, left_itest_func)] +=
-                            0.5 * left_edge_length * edge_weights[i] * dleft_transformed_flux_dul;
+                            left_edge_length * edge_weights[i] * dleft_transformed_flux_dul;
                         dsol[(irelem, right_itest_func, ilelem, left_itest_func)] +=
-                            0.5 * right_edge_length * edge_weights[i] * dright_transformed_flux_dul;
+                            right_edge_length * edge_weights[i] * dright_transformed_flux_dul;
                         // derivatives w.r.t. right value
                         dsol[(ilelem, left_itest_func, irelem, right_itest_func)] +=
-                            0.5 * left_edge_length * edge_weights[i] * dleft_transformed_flux_dur;
+                            left_edge_length * edge_weights[i] * dleft_transformed_flux_dur;
                         dsol[(irelem, right_itest_func, irelem, right_itest_func)] +=
-                            0.5 * right_edge_length * edge_weights[i] * dright_transformed_flux_dur;
+                            right_edge_length * edge_weights[i] * dright_transformed_flux_dur;
                     }
                     for j in 0..3 {
                         dx[(ilelem, left_itest_func, left_elem.inodes[j])] +=
-                            0.5 * left_edge_length * edge_weights[i] * dleft_transformed_flux_dx[j];
+                            left_edge_length * edge_weights[i] * dleft_transformed_flux_dx[j];
                         dy[(ilelem, left_itest_func, left_elem.inodes[j])] +=
-                            0.5 * left_edge_length * edge_weights[i] * dleft_transformed_flux_dy[j];
-                        dx[(irelem, right_itest_func, right_elem.inodes[j])] += 0.5
-                            * right_edge_length
-                            * edge_weights[i]
-                            * dright_transformed_flux_dx[j];
-                        dy[(irelem, right_itest_func, right_elem.inodes[j])] += 0.5
-                            * right_edge_length
-                            * edge_weights[i]
-                            * dright_transformed_flux_dy[j];
+                            left_edge_length * edge_weights[i] * dleft_transformed_flux_dy[j];
+                        dx[(irelem, right_itest_func, right_elem.inodes[j])] +=
+                            right_edge_length * edge_weights[i] * dright_transformed_flux_dx[j];
+                        dy[(irelem, right_itest_func, right_elem.inodes[j])] +=
+                            right_edge_length * edge_weights[i] * dright_transformed_flux_dy[j];
                     }
                 }
             }
@@ -1084,13 +1080,13 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
 
                         residuals[(ielem, itest_func)] +=
-                            0.5 * edge_length * edge_weights[i] * transformed_flux;
+                            edge_length * edge_weights[i] * transformed_flux;
 
                         for j in 0..3 {
                             dx[(ielem, itest_func, inodes[j])] +=
-                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_dx[j];
+                                edge_length * edge_weights[i] * dtransformed_flux_dx[j];
                             dy[(ielem, itest_func, inodes[j])] +=
-                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_dy[j];
+                                edge_length * edge_weights[i] * dtransformed_flux_dy[j];
                         }
 
                         if is_enriched {
@@ -1107,7 +1103,7 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         } else {
                             let sol_nodes = sol_nodes_along_edges.slice(s![local_ids[0], ..]);
                             dsol[(ielem, itest_func, ielem, sol_nodes[i])] +=
-                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_du;
+                                edge_length * edge_weights[i] * dtransformed_flux_du;
                         }
                     }
                 }
@@ -1290,14 +1286,13 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
 
                         residuals[(ielem, itest_func)] +=
-                            0.5 * edge_length * edge_weights[i] * transformed_flux;
+                            edge_length * edge_weights[i] * transformed_flux;
 
-                        let row_idx = ielem * ncell_basis + itest_func;
                         for j in 0..3 {
                             dx[(ielem, itest_func, inodes[j])] +=
-                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_dx[j];
+                                edge_length * edge_weights[i] * dtransformed_flux_dx[j];
                             dy[(ielem, itest_func, inodes[j])] +=
-                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_dy[j];
+                                edge_length * edge_weights[i] * dtransformed_flux_dy[j];
                         }
 
                         if is_enriched {
@@ -1305,18 +1300,15 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                                 .slice(s![local_ids[0], ..])
                                 .indexed_iter()
                             {
-                                let col_idx = ielem * unenriched_ncell_basis + isol_node;
-                                dsol[(ielem, itest_func, ielem, isol_node)] += 0.5
-                                    * edge_length
+                                dsol[(ielem, itest_func, ielem, isol_node)] += edge_length
                                     * edge_weights[i]
                                     * self.interp_node_to_enriched_quadrature()[(i, j)]
                                     * dtransformed_flux_du;
                             }
                         } else {
                             let sol_nodes = sol_nodes_along_edges.slice(s![local_ids[0], ..]);
-                            let col_idx = ielem * ncell_basis + sol_nodes[i];
                             dsol[(ielem, itest_func, ielem, sol_nodes[i])] +=
-                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_du;
+                                edge_length * edge_weights[i] * dtransformed_flux_du;
                         }
                     }
                 }
@@ -1502,14 +1494,14 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                         let itest_func = basis.nodes_along_edges[(local_ids[0], i)];
 
                         residuals[(ielem, itest_func)] +=
-                            0.5 * edge_length * edge_weights[i] * transformed_flux;
+                            edge_length * edge_weights[i] * transformed_flux;
 
                         let row_idx = ielem * ncell_basis + itest_func;
                         for j in 0..3 {
                             dx[(ielem, itest_func, inodes[j])] +=
-                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_dx[j];
+                                edge_length * edge_weights[i] * dtransformed_flux_dx[j];
                             dy[(ielem, itest_func, inodes[j])] +=
-                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_dy[j];
+                                edge_length * edge_weights[i] * dtransformed_flux_dy[j];
                         }
 
                         if is_enriched {
@@ -1528,7 +1520,7 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                             let sol_nodes = sol_nodes_along_edges.slice(s![local_ids[0], ..]);
                             let col_idx = ielem * ncell_basis + sol_nodes[i];
                             dsol[(ielem, itest_func, ielem, sol_nodes[i])] +=
-                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_du;
+                                edge_length * edge_weights[i] * dtransformed_flux_du;
                         }
                     }
                 }
@@ -1634,14 +1626,13 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                             println!("transformed_flux: {:?}", transformed_flux);
                         }
                         residuals[(ielem, itest_func)] +=
-                            0.5 * edge_length * edge_weights[i] * transformed_flux;
+                            edge_length * edge_weights[i] * transformed_flux;
 
-                        let row_idx = ielem * ncell_basis + itest_func;
                         for j in 0..3 {
                             dx[(ielem, itest_func, inodes[j])] +=
-                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_dx[j];
+                                edge_length * edge_weights[i] * dtransformed_flux_dx[j];
                             dy[(ielem, itest_func, inodes[j])] +=
-                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_dy[j];
+                                edge_length * edge_weights[i] * dtransformed_flux_dy[j];
                         }
 
                         if is_enriched {
@@ -1649,18 +1640,15 @@ pub trait SpaceTimeSolver1DScalar: Geometric2D {
                                 .slice(s![local_ids[0], ..])
                                 .indexed_iter()
                             {
-                                let col_idx = ielem * unenriched_ncell_basis + isol_node;
-                                dsol[(ielem, itest_func, ielem, isol_node)] += 0.5
-                                    * edge_length
+                                dsol[(ielem, itest_func, ielem, isol_node)] += edge_length
                                     * edge_weights[i]
                                     * self.interp_node_to_enriched_quadrature()[(i, j)]
                                     * dtransformed_flux_du;
                             }
                         } else {
                             let sol_nodes = sol_nodes_along_edges.slice(s![local_ids[0], ..]);
-                            let col_idx = ielem * ncell_basis + sol_nodes[i];
                             dsol[(ielem, itest_func, ielem, sol_nodes[i])] +=
-                                0.5 * edge_length * edge_weights[i] * dtransformed_flux_du;
+                                edge_length * edge_weights[i] * dtransformed_flux_du;
                         }
                     }
                 }
@@ -2031,7 +2019,7 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
         let k2 = 1e-1;
         let sigma: f64 = 0.5;
         let max_line_search_iter = 20;
-        let max_sqp_iter = 20;
+        let max_sqp_iter = 30;
         // let free_coords = &self.mesh.free_coords;
         // println!("free_coords: {:?}", free_coords);
 
@@ -2046,8 +2034,6 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
         let mut enriched_dy: Array3<f64> = Array3::zeros((nelem, enriched_ncell_basis, nnode));
 
         let mut iter: usize = 0;
-        write_average(&solutions, &mesh, &self.basis(), iter);
-        write_nodal_solutions(&solutions, &mesh, &self.basis(), iter);
         while iter < max_sqp_iter {
             println!("iter: {:?}", iter);
             // reset residuals, dsol, dx, enriched_residuals, enriched_dsol, enriched_dx

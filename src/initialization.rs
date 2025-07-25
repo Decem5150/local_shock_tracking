@@ -21,7 +21,7 @@ pub fn initialize_params_by_file(file_path: &str) -> SolverParameters {
     solver_params
 }
 pub fn initialize_params() -> SolverParameters {
-    let polynomial_order = 3;
+    let polynomial_order = 2;
     let shock_tracking_order = 2;
     let solver_params = SolverParameters {
         cfl: 1.0,

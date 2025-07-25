@@ -54,10 +54,6 @@ fn main() {
     let disc = Disc1dBurgers1dSpaceTime::new(basis, enriched_basis, &solver_params);
     let mut solutions = Array2::<f64>::zeros((mesh.elem_num, disc.basis.r.len()));
 
-    let x = [0.0, 2.0, 0.0];
-    let y = [0.0, 0.0, 0.5];
-    let distortion = Disc1dBurgers1dSpaceTime::compute_distortion(&x, &y, &disc.basis);
-    println!("distortion: {}", distortion);
-    // disc.initialize_solution(solutions.view_mut());
-    //disc.solve(&mut mesh, &mut solutions);
+    disc.initialize_solution(solutions.view_mut());
+    disc.solve(&mut mesh, &mut solutions);
 }

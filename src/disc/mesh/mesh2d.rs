@@ -843,7 +843,6 @@ impl Mesh2d<TriangleElement> {
         };
         */
 
-        /*
         let lower_left_bnd_condition = ConstantBoundary {
             inodes: bottom_nodes_left,
             iedges: bottom_edges_left,
@@ -856,7 +855,7 @@ impl Mesh2d<TriangleElement> {
             value: -0.7,
             position: BoundaryPosition::Lower,
         };
-        */
+
         let lower_bnd_condition = FunctionBoundary {
             inodes: bottom_nodes,
             iedges: bottom_edges,
@@ -867,7 +866,7 @@ impl Mesh2d<TriangleElement> {
         let right_bnd_condition = ConstantBoundary {
             inodes: right_nodes,
             iedges: right_edges,
-            value: -2.0,
+            value: -0.7,
             position: BoundaryPosition::Right,
         };
 
@@ -880,7 +879,7 @@ impl Mesh2d<TriangleElement> {
         let left_bnd_condition = ConstantBoundary {
             inodes: left_nodes,
             iedges: left_edges,
-            value: 2.0,
+            value: -0.3,
             position: BoundaryPosition::Left,
         };
 
@@ -889,13 +888,13 @@ impl Mesh2d<TriangleElement> {
         let constant_bnds = vec![
             right_bnd_condition,
             left_bnd_condition,
-            // lower_left_bnd_condition,
-            // lower_right_bnd_condition,
+            lower_left_bnd_condition,
+            lower_right_bnd_condition,
         ];
-        let function_bnds = vec![lower_bnd_condition];
+        // let function_bnds = vec![lower_bnd_condition];
         let boundaries = Boundaries {
             constant: constant_bnds,
-            function: function_bnds,
+            function: vec![],
             open: open_bnds,
             polynomial: polynomial_bnds,
         };
@@ -909,11 +908,11 @@ impl Mesh2d<TriangleElement> {
 
         let mut free_bnd_x = Vec::new();
         // Bottom boundary nodes (free in x)
-
+        /*
         for j in 1..x_num - 1 {
             free_bnd_x.push(j);
         }
-
+        */
         // Top boundary nodes (free in x)
         for j in 1..x_num - 1 {
             free_bnd_x.push((y_num - 1) * x_num + j);

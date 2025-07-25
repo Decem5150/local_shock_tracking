@@ -28,6 +28,8 @@ pub struct TriangleBasis {
 impl TriangleBasis {
     pub fn new(n: usize) -> Self {
         let (x, y) = Self::nodes2d(n);
+        println!("x: {:?}", x);
+        println!("y: {:?}", y);
         let (r, s) = Self::xy_to_rs(x.view(), y.view());
         println!("r: {:?}", r);
         println!("s: {:?}", s);
@@ -35,9 +37,12 @@ impl TriangleBasis {
         let inv_vandermonde = vandermonde.inv().unwrap();
         let (dr, ds) = Self::dmatrices_2d(n, r.view(), s.view(), vandermonde.view());
         let nodes_along_edges = Self::find_nodes_along_edges(n, r.view(), s.view());
-        let quad_p = Self::jacobi_gauss_lobatto(0.0, 0.0, n);
+        dbg!(&nodes_along_edges);
+        let quad_p_original = Self::jacobi_gauss_lobatto(0.0, 0.0, n);
+        let quad_p = (quad_p_original + 1.0) / 2.0;
         let (_, quad_w_vec) = get_lobatto_points_interval(n + 1);
-        let quad_w = Array1::from_iter(quad_w_vec);
+        let quad_w = Array1::from_iter(quad_w_vec) * 0.5;
+
         let (cub_r, cub_s, cub_w) = Self::cubature_points(2 * n - 1);
         let (dr_cub, ds_cub) =
             Self::dmatrices_2d(n, cub_r.view(), cub_s.view(), vandermonde.view());
@@ -255,7 +260,8 @@ impl TriangleBasis {
     fn xy_to_rs(x: ArrayView1<f64>, y: ArrayView1<f64>) -> (Array1<f64>, Array1<f64>) {
         let l1 = (3.0_f64.sqrt() * &y + 1.0) / 3.0;
         let l2 = (-3.0 * &x - 3.0_f64.sqrt() * &y + 2.0) / 6.0;
-        let r = &l2;
+        let l3 = 1.0 - &l1 - &l2;
+        let r = &l3;
         let s = &l1;
         (r.to_owned(), s.to_owned())
     }
@@ -1063,8 +1069,10 @@ impl Basis for TriangleBasis {
         let mut sk: usize = 0;
         for i in 0..n + 1 {
             for j in 0..n + 1 - i {
-                let (v2dr_col, v2ds_col) =
+                let (mut v2dr_col, mut v2ds_col) =
                     Self::grad_simplex_2d(a.view(), b.view(), i as i32, j as i32);
+                v2dr_col.mapv_inplace(|x| x * 2.0);
+                v2ds_col.mapv_inplace(|x| x * 2.0);
                 v2dr.column_mut(sk).assign(&v2dr_col);
                 v2ds.column_mut(sk).assign(&v2ds_col);
                 sk += 1;
