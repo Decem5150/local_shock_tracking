@@ -1,3 +1,5 @@
+use crate::disc::basis::triangle::TriangleBasis;
+
 pub trait Geometric1D {
     fn compute_ref_normal(local_id: usize) -> [f64; 2] {
         match local_id {
@@ -44,31 +46,31 @@ pub trait Geometric2D {
     }
     fn compute_ref_edge_length(local_id: usize) -> f64 {
         match local_id {
-            0 => 2.0,
-            1 => 2.0 * 2.0_f64.sqrt(),
-            2 => 2.0,
+            0 => 1.0,
+            1 => 2.0_f64.sqrt(),
+            2 => 1.0,
             _ => panic!("Invalid edge ID"),
         }
     }
     fn evaluate_jacob(_xi: f64, _eta: f64, x: &[f64], y: &[f64]) -> (f64, [f64; 4]) {
         // For triangular elements with reference triangle vertices at:
-        // Node 0: (-1, -1)
-        // Node 1: (1, -1)
-        // Node 2: (-1, 1)
+        // Node 0: (0, 0)
+        // Node 1: (1, 0)
+        // Node 2: (0, 1)
         // Shape functions for linear triangle:
-        // N0 = -(xi + eta)/2     (node 0)
-        // N1 = (1 + xi)/2        (node 1)
-        // N2 = (1 + eta)/2       (node 2)
+        // N0 = 1 - xi - eta     (node 0)
+        // N1 = xi               (node 1)
+        // N2 = eta              (node 2)
 
         let dn_dxi = [
-            -0.5, // dN0/dξ
-            0.5,  // dN1/dξ
+            -1.0, // dN0/dξ
+            1.0,  // dN1/dξ
             0.0,  // dN2/dξ
         ];
         let dn_deta = [
-            -0.5, // dN0/dη
+            -1.0, // dN0/dη
             0.0,  // dN1/dη
-            0.5,  // dN2/dη
+            1.0,  // dN2/dη
         ];
 
         let mut dx_dxi = 0.0;
@@ -92,6 +94,42 @@ pub trait Geometric2D {
         ];
 
         (jacob_det, jacob_inv_t)
+    }
+    fn compute_distortion(x: &[f64], y: &[f64], basis: &TriangleBasis) -> f64 {
+        let dn_dxi = [
+            -1.0, // dN0/dξ
+            1.0,  // dN1/dξ
+            0.0,  // dN2/dξ
+        ];
+        let dn_deta = [
+            -1.0, // dN0/dη
+            0.0,  // dN1/dη
+            1.0,  // dN2/dη
+        ];
+        let mut distortion = 0.0;
+        for i in 0..basis.cub_r.len() {
+            let _xi = basis.cub_r[i];
+            let _eta = basis.cub_s[i];
+
+            let mut dx_dxi = 0.0;
+            let mut dx_deta = 0.0;
+            let mut dy_dxi = 0.0;
+            let mut dy_deta = 0.0;
+
+            for k in 0..3 {
+                dx_dxi += dn_dxi[k] * x[k];
+                dx_deta += dn_deta[k] * x[k];
+                dy_dxi += dn_dxi[k] * y[k];
+                dy_deta += dn_deta[k] * y[k];
+            }
+
+            let jacob_det = dx_dxi * dy_deta - dx_deta * dy_dxi;
+            let jacobian = [dx_dxi, dx_deta, dy_dxi, dy_deta];
+
+            let jacobian_frobenius_norm = jacobian.iter().map(|x| x.powi(2)).sum::<f64>().sqrt();
+            distortion += basis.cub_w[i] * (jacobian_frobenius_norm.powi(2) / jacob_det).powi(2);
+        }
+        distortion
     }
     fn compute_element_area(x: &[f64], y: &[f64]) -> f64 {
         // For triangular elements, assumes x and y are slices of length 3

@@ -174,7 +174,7 @@ impl<'a> Disc1dBurgers<'a> {
                             dt,
                             self.solver_param.polynomial_order,
                         );
-                        let submesh_bnd = &mut submesh.polynomial_bnds[0];
+                        let submesh_bnd = &mut submesh.boundaries.polynomial[0];
                         let nodes_along_edges = &self.space_time_basis.nodes_along_edges;
                         let lower_sol_slice = solutions.slice(s![ielem, ..]).select(
                             Axis(0),
@@ -280,11 +280,12 @@ impl<'a> Disc1dBurgers<'a> {
                         );
 
                         let submesh_bnd_idx = submesh
-                            .open_bnds
+                            .boundaries
+                            .open
                             .iter()
                             .position(|b| b.position == BoundaryPosition::Left)
                             .unwrap();
-                        let submesh_bnd = &submesh.open_bnds[submesh_bnd_idx];
+                        let submesh_bnd = &submesh.boundaries.open[submesh_bnd_idx];
 
                         let right_sols_along_boundary = self
                             .shock_tracker
@@ -315,8 +316,8 @@ impl<'a> Disc1dBurgers<'a> {
                             nodal_coeffs: left_lqh_slice.view().slice(s![..;-1]).to_owned(),
                             position: BoundaryPosition::Left,
                         };
-                        submesh.polynomial_bnds.push(submesh_bnd_poly);
-                        submesh.open_bnds.remove(submesh_bnd_idx);
+                        submesh.boundaries.polynomial.push(submesh_bnd_poly);
+                        submesh.boundaries.open.remove(submesh_bnd_idx);
                     }
                     (true, false) => {
                         let troubled_index = map_ielem_to_itroubled[&ilelem];
@@ -338,11 +339,12 @@ impl<'a> Disc1dBurgers<'a> {
                         );
 
                         let submesh_bnd_idx = submesh
-                            .open_bnds
+                            .boundaries
+                            .open
                             .iter()
                             .position(|b| b.position == BoundaryPosition::Right)
                             .unwrap();
-                        let submesh_bnd = &submesh.open_bnds[submesh_bnd_idx];
+                        let submesh_bnd = &submesh.boundaries.open[submesh_bnd_idx];
 
                         let left_sols_along_boundary = self
                             .shock_tracker
@@ -374,8 +376,8 @@ impl<'a> Disc1dBurgers<'a> {
                             nodal_coeffs: right_lqh_slice.view().slice(s![..;-1]).to_owned(),
                             position: BoundaryPosition::Right,
                         };
-                        submesh.polynomial_bnds.push(submesh_bnd_poly);
-                        submesh.open_bnds.remove(submesh_bnd_idx);
+                        submesh.boundaries.polynomial.push(submesh_bnd_poly);
+                        submesh.boundaries.open.remove(submesh_bnd_idx);
                     }
                     (true, true) => {
                         todo!()

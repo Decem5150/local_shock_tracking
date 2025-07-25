@@ -193,19 +193,7 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
         let nx = normal[0];
         let nt = normal[1];
 
-        // Physical flux: F(u) = (0.5*u^2, u)
-        let flux_l = 0.5 * u * u * nx + u * nt;
-        let flux_r = 0.5 * u * u * nx + u * nt;
-
-        // Roe-averaged wave speed: beta = u_avg * nx + nt
-        let u_avg = 0.5 * (u + u);
-        let beta = u_avg * nx + nt;
-
-        // Smoothed absolute value: |x| approx x * tanh(k*x)
-        let abs_beta = beta * (100.0 * beta).tanh();
-
-        let result = 0.5 * (flux_l + flux_r + abs_beta * (u - u));
-        result
+        0.5 * u * u * nx + u * nt
     }
     #[autodiff_reverse(
         dinterior_flux,
@@ -272,24 +260,22 @@ impl P0Solver for Disc1dBurgers1dSpaceTime<'_> {
                     .map(|&val| val.abs())
                     .max_by(|a, b| a.partial_cmp(b).unwrap())
                     .unwrap_or(0.0);
-                let beta_mag = (u_max.powi(2) + 1.0).sqrt();
+                let beta_mag = u_max.abs() + 1.0;
 
-                let mut min_len_sq = std::f64::MAX;
+                // Compute perimeter instead of minimum edge length
+                let mut perimeter = 0.0;
                 for &iedge in &elem.iedges {
                     let edge = &mesh.edges[iedge].as_ref();
                     let n0 = mesh.nodes[edge.inodes[0]].as_ref();
                     let n1 = mesh.nodes[edge.inodes[1]].as_ref();
-                    let len_sq = (n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2);
-                    if len_sq < min_len_sq {
-                        min_len_sq = len_sq;
-                    }
+                    let len = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
+                    perimeter += len;
                 }
-                let min_len = min_len_sq.sqrt();
 
                 let x: [f64; 3] = std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].as_ref().x);
                 let y: [f64; 3] = std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].as_ref().y);
                 let area = Self::compute_element_area(&x, &y);
-                let char_len = 2.0 * area / min_len;
+                let char_len = 2.0 * area / perimeter;
 
                 dts[ielem] = cfl * char_len / beta_mag;
             }

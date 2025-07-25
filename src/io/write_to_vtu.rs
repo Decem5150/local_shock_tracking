@@ -109,7 +109,7 @@ pub fn write_average(
             // u = u0_hat * phi_0 + ...
             // integral(u) = u0_hat * integral(phi_0) + ... = u0_hat * sqrt(2) * Area
             // so, u_avg = u0_hat * sqrt(2)
-            let avg = u0_hat * 2.0_f64.sqrt();
+            let avg = u0_hat / 2.0_f64.sqrt();
             cell_averages.push(avg);
         }
     }
@@ -183,10 +183,10 @@ pub fn write_nodal_solutions(
                 let s = basis.s[i];
 
                 // Triangular shape functions for coordinate transformation
-                // Reference triangle vertices: node 0 at (-1,-1), node 1 at (1,-1), node 2 at (-1,1)
-                let n1 = -(r + s) / 2.0; // Shape function for node 0 at (-1,-1)
-                let n2 = (1.0 + r) / 2.0; // Shape function for node 1 at (1,-1)  
-                let n3 = (1.0 + s) / 2.0; // Shape function for node 2 at (-1,1)
+                // Reference triangle vertices: node 0 at (0,0), node 1 at (1,0), node 2 at (0,1)
+                let n1 = 1.0 - r - s; // Shape function for node 0 at (0,0)
+                let n2 = r; // Shape function for node 1 at (1,0)  
+                let n3 = s; // Shape function for node 2 at (0,1)
 
                 // Map to physical coordinates
                 let x_phys = n1 * x_nodes[0] + n2 * x_nodes[1] + n3 * x_nodes[2];

@@ -73,49 +73,51 @@ impl TriangleBasis {
     fn find_nodes_along_edges(n: usize, r: ArrayView1<f64>, s: ArrayView1<f64>) -> Array2<usize> {
         let node_tol = 1.0e-10;
         let nfp = n + 1;
+
+        // Edge 0: bottom edge (s = 0), from (0,0) to (1,0)
         let fmask1 = r
             .iter()
             .enumerate()
-            .filter_map(|(i, _)| {
-                if (s[i] + 1.0).abs() < node_tol {
-                    Some(i)
-                } else {
-                    None
-                }
-            })
+            .filter_map(|(i, _)| if s[i].abs() < node_tol { Some(i) } else { None })
             .collect::<Vec<usize>>();
+
+        // Edge 1: hypotenuse edge (r + s = 1), from (1,0) to (0,1)
         let fmask2 = r
             .iter()
             .enumerate()
             .filter_map(|(i, &r_val)| {
-                if (r_val + s[i]).abs() < node_tol {
+                if (r_val + s[i] - 1.0).abs() < node_tol {
                     Some(i)
                 } else {
                     None
                 }
             })
             .collect::<Vec<usize>>();
+
+        // Edge 2: left edge (r = 0), from (0,1) to (0,0)
         let mut fmask3 = r
             .iter()
             .enumerate()
             .filter_map(|(i, &r_val)| {
-                if (r_val + 1.0).abs() < node_tol {
+                if r_val.abs() < node_tol {
                     Some(i)
                 } else {
                     None
                 }
             })
             .collect::<Vec<usize>>();
-        fmask3.reverse();
+        fmask3.reverse(); // Maintain counterclockwise ordering
+
         assert_eq!(fmask1.len(), nfp);
         assert_eq!(fmask2.len(), nfp);
         assert_eq!(fmask3.len(), nfp);
+
         /*
         // Verification code
         println!("=== Edge Node Verification (n={}) ===", n);
 
-        // Verify Edge 0 (bottom edge: s = -1, should be ordered by increasing r)
-        println!("Edge 0 (bottom, s=-1) nodes:");
+        // Verify Edge 0 (bottom edge: s = 0, should be ordered by increasing r)
+        println!("Edge 0 (bottom, s=0) nodes:");
         let mut prev_r = f64::NEG_INFINITY;
         for (idx, &node_id) in fmask1.iter().enumerate() {
             let r_val = r[node_id];
@@ -124,7 +126,7 @@ impl TriangleBasis {
 
             // Verify node is on correct edge
             assert!(
-                (s_val + 1.0).abs() < node_tol,
+                s_val.abs() < node_tol,
                 "Node {} not on bottom edge",
                 node_id
             );
@@ -139,8 +141,8 @@ impl TriangleBasis {
             prev_r = r_val;
         }
 
-        // Verify Edge 1 (diagonal edge: r + s = 0, should be ordered by decreasing r)
-        println!("Edge 1 (diagonal, r+s=0) nodes:");
+        // Verify Edge 1 (hypotenuse edge: r + s = 1, should be ordered by decreasing r)
+        println!("Edge 1 (hypotenuse, r+s=1) nodes:");
         let mut prev_r = f64::INFINITY;
         for (idx, &node_id) in fmask2.iter().enumerate() {
             let r_val = r[node_id];
@@ -149,8 +151,8 @@ impl TriangleBasis {
 
             // Verify node is on correct edge
             assert!(
-                (r_val + s_val).abs() < node_tol,
-                "Node {} not on diagonal edge",
+                (r_val + s_val - 1.0).abs() < node_tol,
+                "Node {} not on hypotenuse edge",
                 node_id
             );
 
@@ -164,8 +166,8 @@ impl TriangleBasis {
             prev_r = r_val;
         }
 
-        // Verify Edge 2 (left edge: r = -1, should be ordered by decreasing s)
-        println!("Edge 2 (left, r=-1) nodes:");
+        // Verify Edge 2 (left edge: r = 0, should be ordered by decreasing s)
+        println!("Edge 2 (left, r=0) nodes:");
         let mut prev_s = f64::INFINITY;
         for (idx, &node_id) in fmask3.iter().enumerate() {
             let r_val = r[node_id];
@@ -174,7 +176,7 @@ impl TriangleBasis {
 
             // Verify node is on correct edge
             assert!(
-                (r_val + 1.0).abs() < node_tol,
+                r_val.abs() < node_tol,
                 "Node {} not on left edge",
                 node_id
             );
@@ -189,6 +191,7 @@ impl TriangleBasis {
             prev_s = s_val;
         }
         */
+
         let mut nodes_along_edges = Array2::<usize>::zeros((3, nfp));
         nodes_along_edges
             .slice_mut(s![0, ..])
@@ -202,9 +205,12 @@ impl TriangleBasis {
         nodes_along_edges
     }
     fn rs_to_ab(r: ArrayView1<f64>, s: ArrayView1<f64>) -> (Array1<f64>, Array1<f64>) {
-        let a = r
+        // Map r, s to reference triangle [-1, -1], [1, -1], [-1, 1]
+        let r_map = 2.0 * &r - 1.0;
+        let s_map = 2.0 * &s - 1.0;
+        let a = r_map
             .iter()
-            .zip(s.iter())
+            .zip(s_map.iter())
             .map(|(&r_val, &s_val)| {
                 if s_val != 1.0 {
                     2.0 * (1.0 + r_val) / (1.0 - s_val) - 1.0
@@ -213,7 +219,7 @@ impl TriangleBasis {
                 }
             })
             .collect::<Array1<f64>>();
-        let b = s.to_owned();
+        let b = s_map.to_owned();
         (a, b)
     }
     fn dubiner_basis(a: ArrayView1<f64>, b: ArrayView1<f64>, i: i32, j: i32) -> Array1<f64> {
@@ -249,10 +255,9 @@ impl TriangleBasis {
     fn xy_to_rs(x: ArrayView1<f64>, y: ArrayView1<f64>) -> (Array1<f64>, Array1<f64>) {
         let l1 = (3.0_f64.sqrt() * &y + 1.0) / 3.0;
         let l2 = (-3.0 * &x - 3.0_f64.sqrt() * &y + 2.0) / 6.0;
-        let l3 = (3.0 * &x - 3.0_f64.sqrt() * &y + 2.0) / 6.0;
-        let r = -&l2 + &l3 - &l1;
-        let s = -&l2 - &l3 + &l1;
-        (r, s)
+        let r = &l2;
+        let s = &l1;
+        (r.to_owned(), s.to_owned())
     }
     fn grad_simplex_2d(
         a: ArrayView1<f64>,
@@ -577,10 +582,7 @@ impl TriangleBasis {
                 panic!("Number of points not supported");
             }
         };
-        let r_new = 2.0 * &r - 1.0;
-        let s_new = 2.0 * &s - 1.0;
-        let weight_scaled = &weight * 2.0;
-        (r_new, s_new, weight_scaled)
+        (r, s, weight / 2.0)
     }
     pub fn validate_dmatrices(&self, n: usize) -> bool {
         println!("=== Validating Differentiation Matrices ===");

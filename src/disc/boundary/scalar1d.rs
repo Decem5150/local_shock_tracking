@@ -9,8 +9,9 @@ pub struct ConstantBoundary {
     pub value: f64,
     pub position: BoundaryPosition,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FunctionBoundary {
+    pub inodes: Vec<usize>,
     pub iedges: Vec<usize>,
     pub func: fn(f64, f64) -> f64,
     pub position: BoundaryPosition,
@@ -27,4 +28,14 @@ pub struct OpenBoundary {
     pub inodes: Vec<usize>,
     pub iedges: Vec<usize>,
     pub position: BoundaryPosition,
+}
+
+pub fn burgers_bnd_condition(x: f64, _t: f64) -> f64 {
+    if x < 0.25 {
+        2.0
+    } else if x < 0.75 {
+        4.0 - 8.0 * x
+    } else {
+        -2.0
+    }
 }

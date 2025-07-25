@@ -1,6 +1,8 @@
 use crate::disc::boundary::{
     BoundaryPosition,
-    scalar1d::{ConstantBoundary, OpenBoundary, PolynomialBoundary},
+    scalar1d::{
+        ConstantBoundary, FunctionBoundary, OpenBoundary, PolynomialBoundary, burgers_bnd_condition,
+    },
 };
 
 use super::mesh1d::Node;
@@ -52,6 +54,14 @@ pub struct Edge {
     pub inodes: Vec<usize>,
     pub parents: Vec<usize>,
     pub local_ids: Vec<usize>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Boundaries {
+    pub constant: Vec<ConstantBoundary>,
+    pub function: Vec<FunctionBoundary>,
+    pub open: Vec<OpenBoundary>,
+    pub polynomial: Vec<PolynomialBoundary>,
 }
 
 pub trait Element2d: std::fmt::Debug {
@@ -115,6 +125,7 @@ pub struct TriangleElement {
     pub iedges: [usize; 3],
     pub ineighbors: Vec<usize>,
     pub original_area: f64,
+    // pub ref_distortion: f64,
 }
 impl Element2d for TriangleElement {
     fn inodes(&self) -> &[usize] {
@@ -161,9 +172,7 @@ pub struct Mesh2d<T: Element2d> {
     pub nodes: Vec<Status<Node>>,
     pub edges: Vec<Status<Edge>>,
     pub elements: Vec<Status<T>>,
-    pub constant_bnds: Vec<ConstantBoundary>,
-    pub polynomial_bnds: Vec<PolynomialBoundary>,
-    pub open_bnds: Vec<OpenBoundary>,
+    pub boundaries: Boundaries,
     pub interior_edges: Vec<usize>,
     pub free_bnd_x: Vec<usize>,
     pub free_bnd_y: Vec<usize>,
@@ -197,60 +206,47 @@ impl<T: Element2d> Mesh2d<T> {
             }
         }
     }
-    pub fn rearrange_node_dofs(&self) -> (Vec<usize>, Vec<usize>) {
+    pub fn rearrange_node_dofs(&self) -> Vec<usize> {
         let n_nodes = self.node_num;
         let total_dofs = 2 * n_nodes;
 
-        let mut boundary_free_x_nodes_sorted = self.free_bnd_x.clone();
-        let mut boundary_free_y_nodes_sorted = self.free_bnd_y.clone();
-        let mut interior_nodes_sorted = self.interior_nodes.clone();
-
-        interior_nodes_sorted.sort();
-        boundary_free_x_nodes_sorted.sort();
-        boundary_free_y_nodes_sorted.sort();
-
         let num_interior = self.interior_nodes.len();
-        let num_free_bnd_x = boundary_free_x_nodes_sorted.len();
-        let num_free_bnd_y = boundary_free_y_nodes_sorted.len();
+        let num_free_bnd_x = self.free_bnd_x.len();
+        let num_free_bnd_y = self.free_bnd_y.len();
 
         let num_free_dofs = 2 * num_interior + num_free_bnd_x + num_free_bnd_y;
-        let mut old_to_new = vec![num_free_dofs; total_dofs];
         let mut new_to_old = vec![0; num_free_dofs];
 
         let mut current_idx = 0;
 
         // Interior X DOFs
-        for (i, &node_idx) in interior_nodes_sorted.iter().enumerate() {
+        for (i, &node_idx) in self.interior_nodes.iter().enumerate() {
             let old_idx = node_idx; // x-dof index is the node index
-            old_to_new[old_idx] = current_idx + i;
             new_to_old[current_idx + i] = old_idx;
         }
         current_idx += num_interior;
 
         // Interior Y DOFs
-        for (i, &node_idx) in interior_nodes_sorted.iter().enumerate() {
+        for (i, &node_idx) in self.interior_nodes.iter().enumerate() {
             let old_idx = n_nodes + node_idx; // y-dof index is offset by n_nodes
-            old_to_new[old_idx] = current_idx + i;
             new_to_old[current_idx + i] = old_idx;
         }
         current_idx += num_interior;
 
         // Free Boundary X DOFs
-        for (i, &node_idx) in boundary_free_x_nodes_sorted.iter().enumerate() {
+        for (i, &node_idx) in self.free_bnd_x.iter().enumerate() {
             let old_idx = node_idx;
-            old_to_new[old_idx] = current_idx + i;
             new_to_old[current_idx + i] = old_idx;
         }
         current_idx += num_free_bnd_x;
 
         // Free Boundary Y DOFs
-        for (i, &node_idx) in boundary_free_y_nodes_sorted.iter().enumerate() {
+        for (i, &node_idx) in self.free_bnd_y.iter().enumerate() {
             let old_idx = n_nodes + node_idx;
-            old_to_new[old_idx] = current_idx + i;
             new_to_old[current_idx + i] = old_idx;
         }
 
-        (old_to_new, new_to_old)
+        new_to_old
     }
     pub fn print_free_node_coords(&self) {
         use std::collections::BTreeSet;
@@ -654,9 +650,12 @@ impl Mesh2d<TriangleElement> {
             nodes,
             edges,
             elements,
-            constant_bnds,
-            polynomial_bnds: vec![],
-            open_bnds: vec![],
+            boundaries: Boundaries {
+                constant: constant_bnds,
+                function: vec![],
+                open: vec![],
+                polynomial: vec![],
+            },
             interior_edges,
             free_bnd_x,
             free_bnd_y,
@@ -774,7 +773,7 @@ impl Mesh2d<TriangleElement> {
             elements[elem_idx].as_mut().ineighbors = neighbors;
         }
 
-        let interior_edges: Vec<usize> = (0..edges.len())
+        let mut interior_edges: Vec<usize> = (0..edges.len())
             .filter(|&i| edges[i].as_ref().parents.len() == 2)
             .collect();
 
@@ -798,14 +797,13 @@ impl Mesh2d<TriangleElement> {
             let n2 = (i + 1) * x_num;
             left_edges.push(*edge_map.get(&(n1.min(n2), n1.max(n2))).unwrap());
         }
-        /*
+
         let mut bottom_edges = Vec::new();
         for j in 0..x_num - 1 {
             let n1 = j;
             let n2 = j + 1;
             bottom_edges.push(*edge_map.get(&(n1.min(n2), n1.max(n2))).unwrap());
         }
-        */
 
         let mid_node_idx = x_num / 2;
 
@@ -829,7 +827,7 @@ impl Mesh2d<TriangleElement> {
 
         let left_nodes: Vec<usize> = (0..y_num).rev().map(|i| i * x_num).collect();
 
-        // let bottom_nodes: Vec<usize> = (0..x_num).collect();
+        let bottom_nodes: Vec<usize> = (0..x_num).collect();
 
         let bottom_nodes_left: Vec<usize> = (0..=mid_node_idx).collect();
         let bottom_nodes_right: Vec<usize> = (mid_node_idx..x_num).collect();
@@ -844,32 +842,32 @@ impl Mesh2d<TriangleElement> {
             position: BoundaryPosition::Lower,
         };
         */
-        /*
-        let lower_bnd_condition = PolynomialBoundary {
-            inodes: bottom_nodes,
-            iedges: bottom_edges,
-            nodal_coeffs: Array1::zeros(n_order + 1),
-            position: BoundaryPosition::Lower,
-        };
-        */
 
+        /*
         let lower_left_bnd_condition = ConstantBoundary {
             inodes: bottom_nodes_left,
             iedges: bottom_edges_left,
-            value: 0.6,
+            value: -0.3,
             position: BoundaryPosition::Lower,
         };
         let lower_right_bnd_condition = ConstantBoundary {
             inodes: bottom_nodes_right,
             iedges: bottom_edges_right,
-            value: 0.4,
+            value: -0.7,
+            position: BoundaryPosition::Lower,
+        };
+        */
+        let lower_bnd_condition = FunctionBoundary {
+            inodes: bottom_nodes,
+            iedges: bottom_edges,
+            func: burgers_bnd_condition,
             position: BoundaryPosition::Lower,
         };
 
         let right_bnd_condition = ConstantBoundary {
             inodes: right_nodes,
             iedges: right_edges,
-            value: 0.4,
+            value: -2.0,
             position: BoundaryPosition::Right,
         };
 
@@ -882,7 +880,7 @@ impl Mesh2d<TriangleElement> {
         let left_bnd_condition = ConstantBoundary {
             inodes: left_nodes,
             iedges: left_edges,
-            value: 0.6,
+            value: 2.0,
             position: BoundaryPosition::Left,
         };
 
@@ -891,9 +889,16 @@ impl Mesh2d<TriangleElement> {
         let constant_bnds = vec![
             right_bnd_condition,
             left_bnd_condition,
-            lower_left_bnd_condition,
-            lower_right_bnd_condition,
+            // lower_left_bnd_condition,
+            // lower_right_bnd_condition,
         ];
+        let function_bnds = vec![lower_bnd_condition];
+        let boundaries = Boundaries {
+            constant: constant_bnds,
+            function: function_bnds,
+            open: open_bnds,
+            polynomial: polynomial_bnds,
+        };
 
         let mut interior_nodes = Vec::new();
         for i in 1..y_num - 1 {
@@ -904,11 +909,11 @@ impl Mesh2d<TriangleElement> {
 
         let mut free_bnd_x = Vec::new();
         // Bottom boundary nodes (free in x)
-        /*
+
         for j in 1..x_num - 1 {
             free_bnd_x.push(j);
         }
-        */
+
         // Top boundary nodes (free in x)
         for j in 1..x_num - 1 {
             free_bnd_x.push((y_num - 1) * x_num + j);
@@ -923,13 +928,18 @@ impl Mesh2d<TriangleElement> {
         for i in 1..y_num - 1 {
             free_bnd_y.push(i * x_num + (x_num - 1));
         }
+
+        // Sort interior_edges, free_bnd_x, free_bnd_y, interior_nodes
+        interior_edges.sort();
+        free_bnd_x.sort();
+        free_bnd_y.sort();
+        interior_nodes.sort();
+
         Mesh2d {
             nodes,
             edges,
             elements,
-            constant_bnds,
-            polynomial_bnds,
-            open_bnds,
+            boundaries,
             interior_edges,
             free_bnd_x,
             free_bnd_y,
@@ -938,28 +948,11 @@ impl Mesh2d<TriangleElement> {
             node_num,
         }
     }
-    pub fn collapse_small_elements(&mut self, min_area_ratio: f64, new_to_old: &mut Vec<usize>) {
-        let mut node_boundary_count: HashMap<usize, usize> = HashMap::new();
-        let mut boundary_nodes = HashSet::new();
-
-        let mut count_node_on_boundary = |b_inodes: &[usize]| {
-            let unique_inodes: HashSet<_> = b_inodes.iter().cloned().collect();
-            for &n in &unique_inodes {
-                *node_boundary_count.entry(n).or_insert(0) += 1;
-                boundary_nodes.insert(n);
-            }
-        };
-
-        self.constant_bnds
-            .iter()
-            .for_each(|b| count_node_on_boundary(&b.inodes));
-        self.polynomial_bnds
-            .iter()
-            .for_each(|b| count_node_on_boundary(&b.inodes));
-        self.open_bnds
-            .iter()
-            .for_each(|b| count_node_on_boundary(&b.inodes));
-
+    pub fn collapse_small_elements(
+        &mut self,
+        min_area_ratio: f64,
+        new_to_old_elem: &mut Vec<usize>,
+    ) {
         loop {
             let mut element_to_collapse = None;
             let mut first_small_element_found = None;
@@ -978,10 +971,6 @@ impl Mesh2d<TriangleElement> {
                     let area = 0.5
                         * ((p[1].x - p[0].x) * (p[2].y - p[0].y)
                             - (p[2].x - p[0].x) * (p[1].y - p[0].y));
-                    if elem_idx == 23 {
-                        dbg!(&area);
-                        dbg!(&element.original_area);
-                    }
                     // A negative area indicates different winding order, but its magnitude is what matters.
                     if area <= 1e-12 {
                         println!("Found degenerate element: {}, area: {}", elem_idx, area);
@@ -1040,8 +1029,8 @@ impl Mesh2d<TriangleElement> {
                     _ => (p_indices[2], p_indices[0], p_indices[1]),
                 };
 
-                let v1_is_bnd = boundary_nodes.contains(&v1_idx);
-                let v2_is_bnd = boundary_nodes.contains(&v2_idx);
+                let v1_is_bnd = !self.interior_nodes.contains(&v1_idx);
+                let v2_is_bnd = !self.interior_nodes.contains(&v2_idx);
 
                 // Decide which vertex to merge into which (`v_from_idx` -> `v_to_idx`)
                 let (v_from_idx, v_to_idx) = match (v1_is_bnd, v2_is_bnd) {
@@ -1051,8 +1040,32 @@ impl Mesh2d<TriangleElement> {
                     (true, false) => (v2_idx, v1_idx),
                     // Case 2: Both vertices are on the boundary.
                     (true, true) => {
-                        let c1 = node_boundary_count.get(&v1_idx).copied().unwrap_or(0);
-                        let c2 = node_boundary_count.get(&v2_idx).copied().unwrap_or(0);
+                        let node_boundary_count = |v_idx: usize| -> usize {
+                            let mut count = 0;
+                            for bnd in self.boundaries.constant.iter() {
+                                if bnd.inodes.contains(&v_idx) {
+                                    count += 1;
+                                }
+                            }
+                            for bnd in self.boundaries.open.iter() {
+                                if bnd.inodes.contains(&v_idx) {
+                                    count += 1;
+                                }
+                            }
+                            for bnd in self.boundaries.polynomial.iter() {
+                                if bnd.inodes.contains(&v_idx) {
+                                    count += 1;
+                                }
+                            }
+                            for bnd in self.boundaries.function.iter() {
+                                if bnd.inodes.contains(&v_idx) {
+                                    count += 1;
+                                }
+                            }
+                            count
+                        };
+                        let c1 = node_boundary_count(v1_idx);
+                        let c2 = node_boundary_count(v2_idx);
                         if c1 > c2 {
                             // v1 is a corner, v2 is not. Collapse v2 onto v1.
                             (v2_idx, v1_idx)
@@ -1094,7 +1107,7 @@ impl Mesh2d<TriangleElement> {
 
                 // Perform the collapse and update tracking
                 println!("Collapsing edge from {} to {}...", v_from_idx, v_to_idx);
-                self.perform_edge_collapse(v_from_idx, v_to_idx, new_to_old);
+                self.perform_edge_collapse(v_from_idx, v_to_idx, new_to_old_elem);
                 println!("Collapsed edge from {} to {}", v_from_idx, v_to_idx);
             } else {
                 break;
@@ -1105,7 +1118,7 @@ impl Mesh2d<TriangleElement> {
         &mut self,
         v_from_idx: usize,
         v_to_idx: usize,
-        new_to_old: &mut Vec<usize>,
+        new_to_old_elem: &mut Vec<usize>,
     ) {
         // --- 1. Identify affected and collapsed elements ---
         let parents_from: HashSet<usize> = self.nodes[v_from_idx]
@@ -1174,7 +1187,6 @@ impl Mesh2d<TriangleElement> {
                 // The "to" edge connects the "to" vertex and the other vertex.
                 let to_edge_local_idx = local_edge_idx(local_to, local_other);
                 let to_edge_idx = element.as_ref().iedges[to_edge_local_idx];
-                dbg!(&to_edge_idx);
                 to_edges.push(to_edge_idx);
 
                 edges_to_merge.insert(from_edge_idx, to_edge_idx);
@@ -1334,7 +1346,7 @@ impl Mesh2d<TriangleElement> {
         elements_to_remove_vec.reverse();
         for &elem_idx in &elements_to_remove_vec {
             self.elements[elem_idx].mark_as_removed();
-            new_to_old.retain(|&i| i != elem_idx);
+            new_to_old_elem.retain(|&i| i != elem_idx);
             println!("Removed element: {}", elem_idx);
         }
         let mut edges_to_remove_vec: Vec<usize> = edges_to_remove.iter().cloned().collect();
@@ -1343,13 +1355,13 @@ impl Mesh2d<TriangleElement> {
         for &edge_idx in &edges_to_remove_vec {
             self.interior_edges
                 .retain(|edge| !edges_to_remove.contains(edge));
-            self.polynomial_bnds.iter_mut().for_each(|bnd| {
+            self.boundaries.polynomial.iter_mut().for_each(|bnd| {
                 bnd.iedges.retain(|edge| !edges_to_remove.contains(edge));
             });
-            self.constant_bnds.iter_mut().for_each(|bnd| {
+            self.boundaries.constant.iter_mut().for_each(|bnd| {
                 bnd.iedges.retain(|edge| !edges_to_remove.contains(edge));
             });
-            self.open_bnds.iter_mut().for_each(|bnd| {
+            self.boundaries.open.iter_mut().for_each(|bnd| {
                 bnd.iedges.retain(|edge| !edges_to_remove.contains(edge));
             });
             self.edges[edge_idx].mark_as_removed();
@@ -1360,16 +1372,15 @@ impl Mesh2d<TriangleElement> {
         self.free_bnd_x.retain(|&node| node != v_from_idx);
         self.free_bnd_y.retain(|&node| node != v_from_idx);
 
-        self.polynomial_bnds.iter_mut().for_each(|bnd| {
+        self.boundaries.polynomial.iter_mut().for_each(|bnd| {
             bnd.inodes.retain(|&node| node != v_from_idx);
         });
-        self.constant_bnds.iter_mut().for_each(|bnd| {
+        self.boundaries.constant.iter_mut().for_each(|bnd| {
             bnd.inodes.retain(|&node| node != v_from_idx);
         });
-        self.open_bnds.iter_mut().for_each(|bnd| {
+        self.boundaries.open.iter_mut().for_each(|bnd| {
             bnd.inodes.retain(|&node| node != v_from_idx);
         });
-
         self.nodes[v_from_idx].mark_as_removed();
     }
 }

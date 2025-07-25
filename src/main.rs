@@ -12,6 +12,7 @@ use crate::disc::basis::quadrilateral::QuadrilateralBasis;
 use crate::disc::basis::triangle::TriangleBasis;
 use crate::disc::burgers1d::Disc1dBurgers;
 use crate::disc::burgers1d_space_time::Disc1dBurgers1dSpaceTime;
+use crate::disc::geometric::Geometric2D;
 use crate::disc::mesh::mesh2d::Mesh2d;
 use crate::disc::{SQP, SpaceTimeSolver1DScalar};
 use crate::initialization::initialize_mesh1d;
@@ -52,6 +53,11 @@ fn main() {
 
     let disc = Disc1dBurgers1dSpaceTime::new(basis, enriched_basis, &solver_params);
     let mut solutions = Array2::<f64>::zeros((mesh.elem_num, disc.basis.r.len()));
-    disc.initialize_solution(solutions.view_mut());
-    disc.solve(&mut mesh, &mut solutions);
+
+    let x = [0.0, 2.0, 0.0];
+    let y = [0.0, 0.0, 0.5];
+    let distortion = Disc1dBurgers1dSpaceTime::compute_distortion(&x, &y, &disc.basis);
+    println!("distortion: {}", distortion);
+    // disc.initialize_solution(solutions.view_mut());
+    //disc.solve(&mut mesh, &mut solutions);
 }
