@@ -39,3 +39,10 @@ pub fn burgers_bnd_condition(x: f64, _t: f64) -> f64 {
         -2.0
     }
 }
+
+pub fn burgers_bnd_condition_2(x: f64, _t: f64) -> f64 {
+    2.0 * (x + 1.0).powf(2.0) * (1.0 - heaviside(x))
+}
+fn heaviside(x: f64) -> f64 {
+    if x < 0.0 { 0.0 } else { 1.0 }
+}

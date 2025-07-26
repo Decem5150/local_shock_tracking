@@ -2011,15 +2011,15 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
         let mut new_to_old_elem: Vec<usize> = (0..nelem).collect();
         let ncell_basis = self.basis().r.len();
         let enriched_ncell_basis = self.enriched_basis().r.len();
-        let epsilon1 = 1e-10;
-        let epsilon2 = 1e-12;
-        let mut gamma_k = 1e-2; // regularization parameter for hessian_xx
-        let gamma_min = 1e-8;
+        let epsilon1 = 1e-5;
+        let epsilon2 = 1e-10;
+        let mut gamma_k = 1e-1; // regularization parameter for hessian_xx
+        let gamma_min = 1e-4;
         let k1 = 1e-2;
         let k2 = 1e-1;
         let sigma: f64 = 0.5;
         let max_line_search_iter = 20;
-        let max_sqp_iter = 30;
+        let max_sqp_iter = 50;
         // let free_coords = &self.mesh.free_coords;
         // println!("free_coords: {:?}", free_coords);
 
@@ -2047,8 +2047,11 @@ pub trait SQP: P0Solver + SpaceTimeSolver1DScalar {
             enriched_dy.fill(0.0);
 
             // mesh.print_free_node_coords();
-            write_average(solutions, mesh, &self.basis(), iter);
-            write_nodal_solutions(&solutions, &mesh, &self.basis(), iter);
+            if iter % 5 == 0 {
+                write_average(solutions, mesh, &self.basis(), iter);
+                write_nodal_solutions(&solutions, &mesh, &self.basis(), iter);
+            }
+
             mesh.collapse_small_elements(0.2, &mut new_to_old_elem);
 
             dbg!(&mesh.nodes[2].as_ref().parents);

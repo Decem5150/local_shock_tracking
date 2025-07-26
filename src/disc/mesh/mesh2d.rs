@@ -1,7 +1,8 @@
 use crate::disc::boundary::{
     BoundaryPosition,
     scalar1d::{
-        ConstantBoundary, FunctionBoundary, OpenBoundary, PolynomialBoundary, burgers_bnd_condition,
+        ConstantBoundary, FunctionBoundary, OpenBoundary, PolynomialBoundary,
+        burgers_bnd_condition, burgers_bnd_condition_2,
     },
 };
 
@@ -859,14 +860,14 @@ impl Mesh2d<TriangleElement> {
         let lower_bnd_condition = FunctionBoundary {
             inodes: bottom_nodes,
             iedges: bottom_edges,
-            func: burgers_bnd_condition,
+            func: burgers_bnd_condition_2,
             position: BoundaryPosition::Lower,
         };
 
         let right_bnd_condition = ConstantBoundary {
             inodes: right_nodes,
             iedges: right_edges,
-            value: -0.7,
+            value: burgers_bnd_condition_2(1.0, 0.0),
             position: BoundaryPosition::Right,
         };
 
@@ -879,7 +880,7 @@ impl Mesh2d<TriangleElement> {
         let left_bnd_condition = ConstantBoundary {
             inodes: left_nodes,
             iedges: left_edges,
-            value: -0.3,
+            value: burgers_bnd_condition_2(-1.0, 0.0),
             position: BoundaryPosition::Left,
         };
 
@@ -888,13 +889,13 @@ impl Mesh2d<TriangleElement> {
         let constant_bnds = vec![
             right_bnd_condition,
             left_bnd_condition,
-            lower_left_bnd_condition,
-            lower_right_bnd_condition,
+            // lower_left_bnd_condition,
+            // lower_right_bnd_condition,
         ];
-        // let function_bnds = vec![lower_bnd_condition];
+        let function_bnds = vec![lower_bnd_condition];
         let boundaries = Boundaries {
             constant: constant_bnds,
-            function: vec![],
+            function: function_bnds,
             open: open_bnds,
             polynomial: polynomial_bnds,
         };
@@ -908,11 +909,11 @@ impl Mesh2d<TriangleElement> {
 
         let mut free_bnd_x = Vec::new();
         // Bottom boundary nodes (free in x)
-        /*
+
         for j in 1..x_num - 1 {
             free_bnd_x.push(j);
         }
-        */
+
         // Top boundary nodes (free in x)
         for j in 1..x_num - 1 {
             free_bnd_x.push((y_num - 1) * x_num + j);
