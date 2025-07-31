@@ -3,7 +3,7 @@ use ndarray_linalg::Inverse;
 
 use crate::disc::{
     basis::{
-        Basis, lagrange1d::LobattoBasis, quadrilateral::QuadrilateralBasis, triangle::TriangleBasis,
+        Basis1D, lagrange1d::LobattoBasis, quadrilateral::QuadrilateralBasis, triangle::TriangleBasis,
     },
     mesh::mesh2d::{Mesh2d, TriangleElement},
 };
@@ -196,8 +196,8 @@ pub trait ADER1DScalarShockTracking: ADER1DMatrices {
         dim: BoundaryDimension,
     ) -> Array1<f64> {
         let get_coord = |inode: usize| match dim {
-            BoundaryDimension::Spatial => submesh.nodes[inode].as_ref().x,
-            BoundaryDimension::Temporal => submesh.nodes[inode].as_ref().y,
+            BoundaryDimension::Spatial => submesh.phys_nodes[inode].as_ref().x,
+            BoundaryDimension::Temporal => submesh.phys_nodes[inode].as_ref().y,
         };
 
         let elem_node_coords = Array1::from_iter(
@@ -222,8 +222,8 @@ pub trait ADER1DScalarShockTracking: ADER1DMatrices {
         dim: BoundaryDimension,
     ) -> Array1<f64> {
         let get_coord = |inode: usize| match dim {
-            BoundaryDimension::Spatial => submesh.nodes[inode].as_ref().x,
-            BoundaryDimension::Temporal => submesh.nodes[inode].as_ref().y,
+            BoundaryDimension::Spatial => submesh.phys_nodes[inode].as_ref().x,
+            BoundaryDimension::Temporal => submesh.phys_nodes[inode].as_ref().y,
         };
 
         let elem_node_coords = Array1::from_iter(

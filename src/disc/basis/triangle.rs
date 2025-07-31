@@ -4,25 +4,25 @@ use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, array, s};
 use ndarray_linalg::{Inverse, Solve};
 
 use crate::disc::{
-    basis::{Basis, lagrange1d::LobattoBasis},
+    basis::{Basis1D, Basis2D, lagrange1d::LobattoBasis},
     gauss_points::lobatto_points::get_lobatto_points_interval,
 };
 pub struct TriangleBasis {
     pub n: usize,
-    pub r: Array1<f64>,
-    pub s: Array1<f64>,
+    pub xi: Array1<f64>,
+    pub eta: Array1<f64>,
     pub vandermonde: Array2<f64>,
     pub inv_vandermonde: Array2<f64>,
-    pub dr: Array2<f64>,
-    pub ds: Array2<f64>,
+    pub dxi: Array2<f64>,
+    pub deta: Array2<f64>,
     pub nodes_along_edges: Array2<usize>,
     pub quad_p: Array1<f64>,
     pub quad_w: Array1<f64>,
-    pub cub_r: Array1<f64>,
-    pub cub_s: Array1<f64>,
+    pub cub_xi: Array1<f64>,
+    pub cub_eta: Array1<f64>,
     pub cub_w: Array1<f64>,
-    pub dr_cub: Array2<f64>,
-    pub ds_cub: Array2<f64>,
+    pub dxi_cub: Array2<f64>,
+    pub deta_cub: Array2<f64>,
     pub basis1d: LobattoBasis,
 }
 impl TriangleBasis {
@@ -49,20 +49,20 @@ impl TriangleBasis {
         let basis1d = LobattoBasis::new(n);
         Self {
             n,
-            r,
-            s,
+            xi: r,
+            eta: s,
             vandermonde,
             inv_vandermonde,
-            dr,
-            ds,
+            dxi: dr,
+            deta: ds,
             nodes_along_edges,
             quad_p,
             quad_w,
-            cub_r,
-            cub_s,
+            cub_xi: cub_r,
+            cub_eta: cub_s,
             cub_w,
-            dr_cub,
-            ds_cub,
+            dxi_cub: dr_cub,
+            deta_cub: ds_cub,
             basis1d,
         }
     }
@@ -597,10 +597,10 @@ impl TriangleBasis {
 
         // Test 1: Fundamental property - Dr * V = Vr and Ds * V = Vs
         println!("Test 1: Fundamental differentiation matrix property");
-        let (vr, vs) = Self::grad_vandermonde_2d(n, self.r.view(), self.s.view());
+        let (vr, vs) = Self::grad_vandermonde_2d(n, self.xi.view(), self.eta.view());
 
-        let dr_v = self.dr.dot(&self.vandermonde);
-        let ds_v = self.ds.dot(&self.vandermonde);
+        let dr_v = self.dxi.dot(&self.vandermonde);
+        let ds_v = self.deta.dot(&self.vandermonde);
 
         let dr_error = (&dr_v - &vr).iter().map(|&x| x.abs()).fold(0.0, f64::max);
         let ds_error = (&ds_v - &vs).iter().map(|&x| x.abs()).fold(0.0, f64::max);
@@ -622,12 +622,12 @@ impl TriangleBasis {
 
         for k in 0..np {
             // Create a function that is 1 at node k and 0 at all other nodes
-            let mut nodal_function = Array1::zeros(self.r.len());
+            let mut nodal_function = Array1::zeros(self.xi.len());
             nodal_function[k] = 1.0;
 
             // Apply differentiation matrices
-            let dr_basis = self.dr.dot(&nodal_function);
-            let ds_basis = self.ds.dot(&nodal_function);
+            let dr_basis = self.dxi.dot(&nodal_function);
+            let ds_basis = self.deta.dot(&nodal_function);
 
             // The result should equal the k-th column of Vr and Vs divided by the inverse Vandermonde
             let expected_dr = vr.column(k);
@@ -661,7 +661,7 @@ impl TriangleBasis {
 
         // Test 3: Polynomial exactness using the actual Dubiner basis functions
         println!("\nTest 3: Dubiner basis polynomial differentiation");
-        let (a, b) = Self::rs_to_ab(self.r.view(), self.s.view());
+        let (a, b) = Self::rs_to_ab(self.xi.view(), self.eta.view());
         let mut dubiner_test_passed = true;
 
         for i in 0..=n {
@@ -670,8 +670,8 @@ impl TriangleBasis {
                 let basis_func = Self::dubiner_basis(a.view(), b.view(), i as i32, j as i32);
 
                 // Apply differentiation matrices
-                let dr_dubiner = self.dr.dot(&basis_func);
-                let ds_dubiner = self.ds.dot(&basis_func);
+                let dr_dubiner = self.dxi.dot(&basis_func);
+                let ds_dubiner = self.deta.dot(&basis_func);
 
                 // Expected derivatives from analytical computation
                 let (expected_dr, expected_ds) =
@@ -707,22 +707,22 @@ impl TriangleBasis {
         // Test linear function: r (this should be in the polynomial space for n >= 1)
         if n >= 1 {
             // Project r onto the polynomial space
-            let r_coeffs = self.inv_vandermonde.dot(&self.r);
+            let r_coeffs = self.inv_vandermonde.dot(&self.xi);
             let r_projected = self.vandermonde.dot(&r_coeffs);
 
             // Check if r is well-represented
-            let r_projection_error = (&r_projected - &self.r)
+            let r_projection_error = (&r_projected - &self.xi)
                 .iter()
                 .map(|&x| x.abs())
                 .fold(0.0, f64::max);
 
             if r_projection_error < tolerance {
-                let dr_r = self.dr.dot(&r_projected);
-                let ds_r = self.ds.dot(&r_projected);
+                let dr_r = self.dxi.dot(&r_projected);
+                let ds_r = self.deta.dot(&r_projected);
 
                 // For the projected r, ∂r/∂r should be approximately 1, ∂r/∂s should be approximately 0
-                let expected_dr_r: Array1<f64> = Array1::ones(self.r.len());
-                let expected_ds_r: Array1<f64> = Array1::zeros(self.r.len());
+                let expected_dr_r: Array1<f64> = Array1::ones(self.xi.len());
+                let expected_ds_r: Array1<f64> = Array1::zeros(self.xi.len());
 
                 let dr_r_error = (&dr_r - &expected_dr_r)
                     .iter()
@@ -756,20 +756,20 @@ impl TriangleBasis {
 
         // Test linear function: s
         if n >= 1 {
-            let s_coeffs = self.inv_vandermonde.dot(&self.s);
+            let s_coeffs = self.inv_vandermonde.dot(&self.eta);
             let s_projected = self.vandermonde.dot(&s_coeffs);
 
-            let s_projection_error = (&s_projected - &self.s)
+            let s_projection_error = (&s_projected - &self.eta)
                 .iter()
                 .map(|&x| x.abs())
                 .fold(0.0, f64::max);
 
             if s_projection_error < tolerance {
-                let dr_s = self.dr.dot(&s_projected);
-                let ds_s = self.ds.dot(&s_projected);
+                let dr_s = self.dxi.dot(&s_projected);
+                let ds_s = self.deta.dot(&s_projected);
 
-                let expected_dr_s: Array1<f64> = Array1::zeros(self.s.len());
-                let expected_ds_s: Array1<f64> = Array1::ones(self.s.len());
+                let expected_dr_s: Array1<f64> = Array1::zeros(self.eta.len());
+                let expected_ds_s: Array1<f64> = Array1::ones(self.eta.len());
 
                 let dr_s_error = (&dr_s - &expected_dr_s)
                     .iter()
@@ -803,9 +803,9 @@ impl TriangleBasis {
 
         // Test 5: Matrix properties
         println!("\nTest 5: Matrix properties");
-        let np = self.r.len();
+        let np = self.xi.len();
 
-        if self.dr.shape() != [np, np] || self.ds.shape() != [np, np] {
+        if self.dxi.shape() != [np, np] || self.deta.shape() != [np, np] {
             println!("  ❌ FAILED: Matrix dimensions incorrect");
             all_tests_passed = false;
         } else {
@@ -814,8 +814,8 @@ impl TriangleBasis {
 
         // Test 6: Conservation property (sum of each row should be derivative of constant = 0)
         println!("\nTest 6: Conservation property");
-        let dr_row_sums: Array1<f64> = self.dr.sum_axis(Axis(1));
-        let ds_row_sums: Array1<f64> = self.ds.sum_axis(Axis(1));
+        let dr_row_sums: Array1<f64> = self.dxi.sum_axis(Axis(1));
+        let ds_row_sums: Array1<f64> = self.deta.sum_axis(Axis(1));
 
         let dr_conservation_error = dr_row_sums.iter().map(|&x| x.abs()).fold(0.0, f64::max);
         let ds_conservation_error = ds_row_sums.iter().map(|&x| x.abs()).fold(0.0, f64::max);
@@ -848,8 +848,8 @@ impl TriangleBasis {
         // The derivatives will be validated at the basis's own nodal points (self.r, self.s)
         // If grad_vandermonde_2d was called with different points (e.g., cubature points),
         // this validation should use those same points.
-        let test_r_view = self.r.view();
-        let test_s_view = self.s.view();
+        let test_r_view = self.xi.view();
+        let test_s_view = self.eta.view();
 
         let (v2dr, v2ds) = Self::grad_vandermonde_2d(n_poly_order, test_r_view, test_s_view);
 
@@ -872,8 +872,8 @@ impl TriangleBasis {
                     println!(
                         "  ❌ FAIL (P_00): dP/dr at point {} (r={:.2e}, s={:.2e}) is {:.2e} (should be ~0)",
                         k_point,
-                        self.r[k_point],
-                        self.s[k_point],
+                        self.xi[k_point],
+                        self.eta[k_point],
                         v2dr[(k_point, 0)]
                     );
                     const_mode_passed = false;
@@ -882,8 +882,8 @@ impl TriangleBasis {
                     println!(
                         "  ❌ FAIL (P_00): dP/ds at point {} (r={:.2e}, s={:.2e}) is {:.2e} (should be ~0)",
                         k_point,
-                        self.r[k_point],
-                        self.s[k_point],
+                        self.xi[k_point],
+                        self.eta[k_point],
                         v2ds[(k_point, 0)]
                     );
                     const_mode_passed = false;
@@ -958,8 +958,8 @@ impl TriangleBasis {
             println!("  Testing Mode Index: {}", m_basis_idx);
 
             for &k_point_idx in &points_to_test_indices {
-                let r_k = self.r[k_point_idx];
-                let s_k = self.s[k_point_idx];
+                let r_k = self.xi[k_point_idx];
+                let s_k = self.eta[k_point_idx];
 
                 // Analytical derivatives from v2dr, v2ds
                 let anal_dvdr = v2dr[(k_point_idx, m_basis_idx)];
@@ -1031,8 +1031,8 @@ impl TriangleBasis {
         println!("=== Modal Derivative Validation Complete ===");
     }
 }
-
-impl Basis for TriangleBasis {
+impl Basis1D for TriangleBasis {}
+impl Basis2D for TriangleBasis {
     fn vandermonde2d(n: usize, r: ArrayView1<f64>, s: ArrayView1<f64>) -> Array2<f64> {
         let mut v = Array2::<f64>::zeros((r.len(), (n + 1) * (n + 2) / 2));
         let (a, b) = Self::rs_to_ab(r, s);

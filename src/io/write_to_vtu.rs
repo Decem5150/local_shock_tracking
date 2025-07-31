@@ -6,7 +6,7 @@ use vtkio::{
     Vtk,
     model::{
         Attribute, Attributes, ByteOrder, CellType, Cells, DataArray, DataSet, ElementType,
-        IOBuffer, Piece, UnstructuredGridPiece, Version, VertexNumbers,
+        IOBuffer, UnstructuredGridPiece, Version, VertexNumbers,
     },
 };
 
@@ -64,16 +64,17 @@ static OUTPUT_DIR: Lazy<String> = Lazy::new(|| {
 });
 
 pub fn write_average(
+    name: &str,
     solutions: &Array2<f64>,
     mesh: &Mesh2d<TriangleElement>,
     basis: &TriangleBasis,
     current_step: usize,
 ) {
     let mut vtk_points = Vec::new();
-    let mut node_map = vec![None; mesh.nodes.len()];
+    let mut node_map = vec![None; mesh.phys_nodes.len()];
     let mut new_node_idx = 0;
 
-    for (i, node_status) in mesh.nodes.iter().enumerate() {
+    for (i, node_status) in mesh.phys_nodes.iter().enumerate() {
         if let Status::Active(node) = node_status {
             vtk_points.push(node.x);
             vtk_points.push(node.y);
@@ -86,6 +87,7 @@ pub fn write_average(
     let mut connectivity = Vec::with_capacity(mesh.elements.len() * 3);
     let mut cell_types = Vec::with_capacity(mesh.elements.len());
     let mut cell_averages = Vec::with_capacity(mesh.elements.len());
+    let mut original_element_indices = Vec::with_capacity(mesh.elements.len());
     let mut num_cells = 0;
 
     for (elem_idx, elem_status) in mesh.elements.iter().enumerate() {
@@ -99,6 +101,7 @@ pub fn write_average(
             connectivity.extend(vtk_conn_elem);
             cell_types.push(CellType::Triangle);
             num_cells += 1;
+            original_element_indices.push(elem_idx as u64);
 
             let u_e = solutions.row(elem_idx);
             let modal_coeffs = basis.inv_vandermonde.dot(&u_e);
@@ -114,7 +117,7 @@ pub fn write_average(
         }
     }
 
-    let filename = format!("{}/solution_{}.vtu", &*OUTPUT_DIR, current_step);
+    let filename = format!("{}/{}_{}.vtu", &*OUTPUT_DIR, name, current_step);
 
     let vtk_file = Vtk {
         version: Version::XML { major: 1, minor: 0 },
@@ -131,14 +134,24 @@ pub fn write_average(
             },
             data: Attributes {
                 point: vec![],
-                cell: vec![Attribute::DataArray(DataArray {
-                    name: "solution".to_string(),
-                    elem: ElementType::Scalars {
-                        num_comp: 1,
-                        lookup_table: None,
-                    },
-                    data: IOBuffer::F64(cell_averages),
-                })],
+                cell: vec![
+                    Attribute::DataArray(DataArray {
+                        name: "solution".to_string(),
+                        elem: ElementType::Scalars {
+                            num_comp: 1,
+                            lookup_table: None,
+                        },
+                        data: IOBuffer::F64(cell_averages),
+                    }),
+                    Attribute::DataArray(DataArray {
+                        name: "original_element_indices".to_string(),
+                        elem: ElementType::Scalars {
+                            num_comp: 1,
+                            lookup_table: None,
+                        },
+                        data: IOBuffer::U64(original_element_indices),
+                    }),
+                ],
             },
         }),
         file_path: None,
@@ -150,6 +163,7 @@ pub fn write_average(
 }
 
 pub fn write_nodal_solutions(
+    name: &str,
     solutions: &Array2<f64>,
     mesh: &Mesh2d<TriangleElement>,
     basis: &TriangleBasis,
@@ -160,7 +174,7 @@ pub fn write_nodal_solutions(
     let mut cell_types = Vec::new();
     let mut point_solutions = Vec::new();
 
-    let num_solution_nodes = basis.r.len();
+    let num_solution_nodes = basis.xi.len();
     let mut global_point_id = 0_usize;
 
     for (elem_idx, elem_status) in mesh.elements.iter().enumerate() {
@@ -170,17 +184,17 @@ pub fn write_nodal_solutions(
             // Get physical coordinates of the mesh nodes for this element
             let x_nodes: Vec<f64> = element_inodes
                 .iter()
-                .map(|&inode| mesh.nodes[inode].as_ref().x)
+                .map(|&inode| mesh.phys_nodes[inode].as_ref().x)
                 .collect();
             let y_nodes: Vec<f64> = element_inodes
                 .iter()
-                .map(|&inode| mesh.nodes[inode].as_ref().y)
+                .map(|&inode| mesh.phys_nodes[inode].as_ref().y)
                 .collect();
 
             // Map each solution node from reference coordinates to physical coordinates
             for i in 0..num_solution_nodes {
-                let r = basis.r[i];
-                let s = basis.s[i];
+                let r = basis.xi[i];
+                let s = basis.eta[i];
 
                 // Triangular shape functions for coordinate transformation
                 // Reference triangle vertices: node 0 at (0,0), node 1 at (1,0), node 2 at (0,1)
@@ -244,7 +258,7 @@ pub fn write_nodal_solutions(
         }
     }
 
-    let filename = format!("{}/solution_nodal_{}.vtu", &*OUTPUT_DIR, current_step);
+    let filename = format!("{}/{}_nodal_{}.vtu", &*OUTPUT_DIR, name, current_step);
 
     let vtk_file = Vtk {
         version: Version::XML { major: 1, minor: 0 },

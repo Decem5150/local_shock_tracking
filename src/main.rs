@@ -11,11 +11,11 @@ use crate::disc::basis::lagrange1d::LobattoBasis;
 use crate::disc::basis::quadrilateral::QuadrilateralBasis;
 use crate::disc::basis::triangle::TriangleBasis;
 use crate::disc::boundary::scalar1d::burgers_bnd_condition_2;
-use crate::disc::burgers1d::Disc1dBurgers;
+// use crate::disc::burgers1d::Disc1dBurgers;
 use crate::disc::burgers1d_space_time::Disc1dBurgers1dSpaceTime;
 use crate::disc::geometric::Geometric2D;
 use crate::disc::mesh::mesh2d::Mesh2d;
-use crate::disc::{SQP, SpaceTimeSolver1DScalar};
+use crate::disc::{SQP, space_time_1d_scalar::SpaceTime1DScalar};
 use crate::initialization::initialize_mesh1d;
 use crate::io::write_to_vtu::write_nodal_solutions;
 fn main() {
@@ -50,13 +50,13 @@ fn main() {
     let basis = TriangleBasis::new(solver_params.polynomial_order);
     let enriched_basis = TriangleBasis::new(solver_params.polynomial_order + 1);
     let mut mesh =
-        Mesh2d::create_tri_mesh(9, 5, -1.0, 1.0, 0.0, 1.0, solver_params.polynomial_order);
+        Mesh2d::create_tri_mesh(5, 5, 0.0, 1.0, 0.0, 0.5, solver_params.polynomial_order);
     // dbg!(&mesh.boundaries.function);
     // dbg!(&mesh.boundaries.constant);
     // dbg!(&burgers_bnd_condition_2(-0.2, 0.0));
     // dbg!(&burgers_bnd_condition_2(-0.5, 0.0));
     let disc = Disc1dBurgers1dSpaceTime::new(basis, enriched_basis, &solver_params);
-    let mut solutions = Array2::<f64>::zeros((mesh.elem_num, disc.basis.r.len()));
+    let mut solutions = Array2::<f64>::zeros((mesh.elem_num, disc.basis.xi.len()));
 
     disc.initialize_solution(solutions.view_mut());
     disc.solve(&mut mesh, &mut solutions);

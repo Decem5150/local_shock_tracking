@@ -21,7 +21,7 @@ pub trait Geometric2D {
         let normal_magnitude = (normal[0].powi(2) + normal[1].powi(2)).sqrt();
         [normal[0] / normal_magnitude, normal[1] / normal_magnitude]
     }
-    fn compute_ref_normal(local_id: usize) -> [f64; 2] {
+    fn compute_canonical_normal(local_id: usize) -> [f64; 2] {
         match local_id {
             0 => {
                 // Bottom edge: from (0,0) to (1,0)
@@ -44,13 +44,16 @@ pub trait Geometric2D {
             }
         }
     }
-    fn compute_ref_edge_length(local_id: usize) -> f64 {
+    fn compute_canonical_edge_length(local_id: usize) -> f64 {
         match local_id {
             0 => 1.0,
             1 => 2.0_f64.sqrt(),
             2 => 1.0,
             _ => panic!("Invalid edge ID"),
         }
+    }
+    fn compute_edge_length(x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
+        ((x1 - x0).powi(2) + (y1 - y0).powi(2)).sqrt()
     }
     fn evaluate_jacob(_xi: f64, _eta: f64, x: &[f64], y: &[f64]) -> (f64, [f64; 4]) {
         // For triangular elements with reference triangle vertices at:
@@ -107,9 +110,9 @@ pub trait Geometric2D {
             1.0,  // dN2/dη
         ];
         let mut distortion = 0.0;
-        for i in 0..basis.cub_r.len() {
-            let _xi = basis.cub_r[i];
-            let _eta = basis.cub_s[i];
+        for i in 0..basis.cub_xi.len() {
+            let _xi = basis.cub_xi[i];
+            let _eta = basis.cub_eta[i];
 
             let mut dx_dxi = 0.0;
             let mut dx_deta = 0.0;

@@ -5,9 +5,10 @@ use statrs::function::gamma::gamma;
 
 pub mod lagrange1d;
 pub mod quadrilateral;
+pub mod tetrahedron;
 pub mod triangle;
 
-pub trait Basis {
+pub trait Basis1D {
     fn vandermonde1d(n: usize, r: ArrayView1<f64>) -> Array2<f64> {
         let mut v = Array2::<f64>::zeros((r.len(), n + 1));
         for j in 0..n + 1 {
@@ -16,6 +17,7 @@ pub trait Basis {
         }
         v
     }
+    /*
     fn vandermonde1d_nalgebra(n: usize, r: &DVector<f64>) -> DMatrix<f64> {
         let mut v = DMatrix::zeros(r.len(), n + 1);
         for j in 0..=n {
@@ -24,6 +26,7 @@ pub trait Basis {
         }
         v
     }
+    */
     fn jacobi_gauss_quadrature(alpha: f64, beta: f64, n: usize) -> (Array1<f64>, Array1<f64>) {
         match n {
             0 => {
@@ -108,15 +111,6 @@ pub trait Basis {
                 / (h1_for_Ak + 1.0)
                 / (h1_for_Ak + 3.0))
                 .sqrt();
-        /*
-        if ak_val.is_nan() {
-            // Add a check for NaN, which can happen if terms under sqrt are negative
-            panic!(
-                "NaN encountered in A_k calculation for k={}, alpha={}, beta={}",
-                k_order, alpha, beta
-            );
-        }
-        */
         ak_val
     }
     #[allow(non_snake_case)]
@@ -169,6 +163,7 @@ pub trait Basis {
             }
         }
     }
+    /*
     #[allow(non_snake_case)]
     fn jacobi_polynomial_nalgebra(x: &DVector<f64>, alpha: f64, beta: f64, n: i32) -> DVector<f64> {
         match n {
@@ -221,6 +216,7 @@ pub trait Basis {
             }
         }
     }
+    */
     fn grad_jacobi_polynomial(r: ArrayView1<f64>, alpha: f64, beta: f64, n: i32) -> Array1<f64> {
         let mut dp = Array1::<f64>::zeros(r.len());
         match n {
@@ -235,6 +231,15 @@ pub trait Basis {
         }
         dp
     }
+}
+pub trait Basis2D: Basis1D {
+    fn vandermonde2d(n: usize, r: ArrayView1<f64>, s: ArrayView1<f64>) -> Array2<f64>;
+    fn grad_vandermonde_2d(
+        n: usize,
+        r: ArrayView1<f64>,
+        s: ArrayView1<f64>,
+    ) -> (Array2<f64>, Array2<f64>);
+    fn nodes2d(n: usize) -> (Array1<f64>, Array1<f64>);
     fn dmatrices_2d(
         n: usize,
         r: ArrayView1<f64>,
@@ -251,11 +256,26 @@ pub trait Basis {
         let ds = vs.dot(&inv_v);
         (dr, ds)
     }
-    fn vandermonde2d(n: usize, r: ArrayView1<f64>, s: ArrayView1<f64>) -> Array2<f64>;
-    fn grad_vandermonde_2d(
+}
+pub trait Basis3D: Basis1D {
+    fn vandermonde3d(
         n: usize,
         r: ArrayView1<f64>,
         s: ArrayView1<f64>,
-    ) -> (Array2<f64>, Array2<f64>);
-    fn nodes2d(n: usize) -> (Array1<f64>, Array1<f64>);
+        t: ArrayView1<f64>,
+    ) -> Array2<f64>;
+    fn grad_vandermonde_3d(
+        n: usize,
+        r: ArrayView1<f64>,
+        s: ArrayView1<f64>,
+        t: ArrayView1<f64>,
+    ) -> (Array2<f64>, Array2<f64>, Array2<f64>);
+    fn nodes3d(n: usize) -> (Array1<f64>, Array1<f64>, Array1<f64>);
+    fn dmatrices_3d(
+        n: usize,
+        r: ArrayView1<f64>,
+        s: ArrayView1<f64>,
+        t: ArrayView1<f64>,
+        v: ArrayView2<f64>,
+    ) -> (Array2<f64>, Array2<f64>, Array2<f64>);
 }

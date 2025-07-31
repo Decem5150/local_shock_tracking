@@ -3,12 +3,12 @@ use ndarray_linalg::Inverse;
 use std::autodiff::autodiff_reverse;
 
 use super::{
-    basis::{Basis, triangle::TriangleBasis},
+    basis::{Basis1D, triangle::TriangleBasis},
     mesh::mesh2d::{Mesh2d, TriangleElement},
 };
 use crate::{
     disc::{
-        P0Solver, SQP, SpaceTimeSolver1DScalar,
+        P0Solver, SQP, SpaceTime1DScalar,
         ader::{ADER1DMatrices, ADER1DScalarShockTracking},
         geometric::Geometric2D,
         mesh::mesh2d::Status,
@@ -35,14 +35,14 @@ impl<'a> Disc1dBurgers1dSpaceTime<'a> {
         let interp_node_to_cubature = Self::compute_interp_matrix_2d(
             solver_param.polynomial_order,
             basis.inv_vandermonde.view(),
-            basis.cub_r.view(),
-            basis.cub_s.view(),
+            basis.cub_xi.view(),
+            basis.cub_eta.view(),
         );
         let interp_node_to_enriched_cubature = Self::compute_interp_matrix_2d(
             solver_param.polynomial_order,
             basis.inv_vandermonde.view(),
-            enriched_basis.cub_r.view(),
-            enriched_basis.cub_s.view(),
+            enriched_basis.cub_xi.view(),
+            enriched_basis.cub_eta.view(),
         );
         let gauss_lobatto_points = &basis.quad_p;
         let enriched_gauss_lobatto_points = &enriched_basis.quad_p;
@@ -67,7 +67,7 @@ impl<'a> Disc1dBurgers1dSpaceTime<'a> {
         }
     }
 }
-impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
+impl SpaceTime1DScalar for Disc1dBurgers1dSpaceTime<'_> {
     fn basis(&self) -> &TriangleBasis {
         &self.basis
     }
@@ -91,9 +91,9 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
         self.mesh
     }
     */
-    #[autodiff_reverse(
-        dvolume, Const, Const, Const, Duplicated, Duplicated, Duplicated, Active
-    )]
+    // #[autodiff_reverse(
+    //     dvolume, Const, Const, Const, Duplicated, Duplicated, Duplicated, Active
+    // )]
     fn volume_integral(
         &self,
         basis: &TriangleBasis,
@@ -102,13 +102,13 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
         x: &[f64],
         y: &[f64],
     ) -> f64 {
-        let ngp = basis.cub_r.len();
+        let ngp = basis.cub_xi.len();
         let weights = &basis.cub_w;
         let mut res = 0.0;
         for igp in 0..ngp {
             let f = self.physical_flux(sol[igp]);
-            let xi = basis.cub_r[igp];
-            let eta = basis.cub_s[igp];
+            let xi = basis.cub_xi[igp];
+            let eta = basis.cub_eta[igp];
             let (jacob_det, jacob_inv_t) = Self::evaluate_jacob(xi, eta, x, y);
             let transformed_f = {
                 [
@@ -116,16 +116,60 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
                     jacob_det * (f[0] * jacob_inv_t[1] + f[1] * jacob_inv_t[3]),
                 ]
             };
-            let dtest_func_dxi = basis.dr_cub[(igp, itest_func)];
-            let dtest_func_deta = basis.ds_cub[(igp, itest_func)];
+            let dtest_func_dxi = basis.dxi_cub[(igp, itest_func)];
+            let dtest_func_deta = basis.deta_cub[(igp, itest_func)];
             res -= weights[igp] * transformed_f[0] * dtest_func_dxi
                 + weights[igp] * transformed_f[1] * dtest_func_deta;
         }
         res
     }
-    #[autodiff_reverse(
-        dnum_flux, Const, Active, Active, Active, Active, Active, Active, Active
-    )]
+    fn compute_numerical_flux(&self, ul: f64, ur: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64 {
+        let normal = Self::compute_normal(x0, y0, x1, y1);
+        let nx = normal[0];
+        let nt = normal[1];
+
+        // Physical flux: F(u) = (0.5*u^2, u)
+        let flux_l = 0.5 * ul * ul * nx + ul * nt;
+        let flux_r = 0.5 * ur * ur * nx + ur * nt;
+
+        // Roe-averaged wave speed: beta = u_avg * nx + nt
+        let u_avg = 0.5 * (ul + ur);
+        let beta = u_avg * nx + nt;
+
+        let result = 0.5 * (flux_l + flux_r + beta.abs() * (ul - ur));
+        result
+    }
+    // #[autodiff_reverse(
+    //     dnum_flux, Const, Active, Active, Active, Active, Active, Active, Active
+    // )]
+    fn compute_smoothed_numerical_flux(
+        &self,
+        ul: f64,
+        ur: f64,
+        x0: f64,
+        x1: f64,
+        y0: f64,
+        y1: f64,
+    ) -> f64 {
+        let normal = Self::compute_normal(x0, y0, x1, y1);
+        let nx = normal[0];
+        let nt = normal[1];
+
+        // Physical flux: F(u) = (0.5*u^2, u)
+        let flux_l = 0.5 * ul * ul * nx + ul * nt;
+        let flux_r = 0.5 * ur * ur * nx + ur * nt;
+
+        // Roe-averaged wave speed: beta = u_avg * nx + nt
+        let u_avg = 0.5 * (ul + ur);
+        let beta = u_avg * nx + nt;
+
+        // Smoothes Heaviside fuction:
+        let alpha = 30.0;
+        let heaviside = 1.0 / (1.0 + (-2.0 * alpha * beta).exp());
+        let result = flux_l * heaviside + flux_r * (1.0 - heaviside);
+        result
+    }
+    /*
     fn compute_numerical_flux(&self, ul: f64, ur: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64 {
         let normal = Self::compute_normal(x0, y0, x1, y1);
         let nx = normal[0];
@@ -145,9 +189,49 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
         let result = 0.5 * (flux_l + flux_r + abs_beta * (ul - ur));
         result
     }
-    #[autodiff_reverse(
-        dbnd_flux, Const, Active, Const, Active, Active, Active, Active, Active
-    )]
+    */
+    fn compute_boundary_flux(&self, u: f64, ub: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64 {
+        let normal = Self::compute_normal(x0, y0, x1, y1);
+        let nx = normal[0];
+        let nt = normal[1];
+
+        let flux_l = 0.5 * u * u * nx + u * nt;
+        let flux_r = 0.5 * ub * ub * nx + ub * nt;
+
+        let u_avg = 0.5 * (u + ub);
+        let beta = u_avg * nx + nt;
+
+        let result = 0.5 * (flux_l + flux_r + beta.abs() * (u - ub));
+        result
+    }
+    // #[autodiff_reverse(
+    //     dbnd_flux, Const, Active, Const, Active, Active, Active, Active, Active
+    // )]
+    fn compute_smoothed_boundary_flux(
+        &self,
+        u: f64,
+        ub: f64,
+        x0: f64,
+        x1: f64,
+        y0: f64,
+        y1: f64,
+    ) -> f64 {
+        let normal = Self::compute_normal(x0, y0, x1, y1);
+        let nx = normal[0];
+        let nt = normal[1];
+
+        let flux_l = 0.5 * u * u * nx + u * nt;
+        let flux_r = 0.5 * ub * ub * nx + ub * nt;
+
+        let u_avg = 0.5 * (u + ub);
+        let beta = u_avg * nx + nt;
+
+        let alpha = 30.0;
+        let heaviside = 1.0 / (1.0 + (-2.0 * alpha * beta).exp());
+        let result = flux_l * heaviside + flux_r * (1.0 - heaviside);
+        result
+    }
+    /*
     fn compute_boundary_flux(&self, u: f64, ub: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64 {
         let normal = Self::compute_normal(x0, y0, x1, y1);
         let nx = normal[0];
@@ -167,7 +251,8 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
         let result = 0.5 * (flux_l + flux_r + abs_beta * (u - ub));
         result
     }
-    #[autodiff_reverse(dscaling, Const, Const, Const, Const, Duplicated, Duplicated, Active)]
+    */
+    // #[autodiff_reverse(dscaling, Const, Const, Const, Const, Duplicated, Duplicated, Active)]
     fn compute_flux_scaling(
         &self,
         xi: f64,
@@ -187,7 +272,7 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
             (transformed_normal[0].powi(2) + transformed_normal[1].powi(2)).sqrt();
         jacob_det * normal_magnitude
     }
-    #[autodiff_reverse(dopen_bnd_flux, Const, Active, Active, Active, Active, Active, Active)]
+    // #[autodiff_reverse(dopen_bnd_flux, Const, Active, Active, Active, Active, Active, Active)]
     fn compute_open_boundary_flux(&self, u: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64 {
         let normal = Self::compute_normal(x0, y0, x1, y1);
         let nx = normal[0];
@@ -195,17 +280,17 @@ impl SpaceTimeSolver1DScalar for Disc1dBurgers1dSpaceTime<'_> {
 
         0.5 * u * u * nx + u * nt
     }
-    #[autodiff_reverse(
-        dinterior_flux,
-        Const,
-        Const,
-        Const,
-        Const,
-        Active,
-        Duplicated,
-        Duplicated,
-        Active
-    )]
+    // #[autodiff_reverse(
+    //     dinterior_flux,
+    //     Const,
+    //     Const,
+    //     Const,
+    //     Const,
+    //     Active,
+    //     Duplicated,
+    //     Duplicated,
+    //     Active
+    // )]
     fn compute_interior_flux(
         &self,
         xi: f64,
@@ -266,14 +351,16 @@ impl P0Solver for Disc1dBurgers1dSpaceTime<'_> {
                 let mut perimeter = 0.0;
                 for &iedge in &elem.iedges {
                     let edge = &mesh.edges[iedge].as_ref();
-                    let n0 = mesh.nodes[edge.inodes[0]].as_ref();
-                    let n1 = mesh.nodes[edge.inodes[1]].as_ref();
+                    let n0 = mesh.phys_nodes[edge.inodes[0]].as_ref();
+                    let n1 = mesh.phys_nodes[edge.inodes[1]].as_ref();
                     let len = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
                     perimeter += len;
                 }
 
-                let x: [f64; 3] = std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].as_ref().x);
-                let y: [f64; 3] = std::array::from_fn(|i| mesh.nodes[elem.inodes[i]].as_ref().y);
+                let x: [f64; 3] =
+                    std::array::from_fn(|i| mesh.phys_nodes[elem.inodes[i]].as_ref().x);
+                let y: [f64; 3] =
+                    std::array::from_fn(|i| mesh.phys_nodes[elem.inodes[i]].as_ref().y);
                 let area = Self::compute_element_area(&x, &y);
                 let char_len = 2.0 * area / perimeter;
 

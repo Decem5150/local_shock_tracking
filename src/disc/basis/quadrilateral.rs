@@ -2,7 +2,7 @@ use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, array, s};
 use ndarray_linalg::{Eigh, Inverse, Solve, UPLO};
 use statrs::function::gamma::gamma;
 
-use crate::disc::basis::Basis;
+use crate::disc::basis::{Basis1D, Basis2D};
 use crate::disc::gauss_points::lobatto_points::get_lobatto_points_interval;
 
 pub struct QuadrilateralBasis {
@@ -109,7 +109,8 @@ impl QuadrilateralBasis {
         cub_w
     }
 }
-impl Basis for QuadrilateralBasis {
+impl Basis1D for QuadrilateralBasis {}
+impl Basis2D for QuadrilateralBasis {
     fn vandermonde2d(n: usize, r: ArrayView1<f64>, s: ArrayView1<f64>) -> Array2<f64> {
         let n_basis_1d = n + 1;
         let num_points = r.len();

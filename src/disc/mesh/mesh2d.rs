@@ -6,7 +6,6 @@ use crate::disc::boundary::{
     },
 };
 
-use super::mesh1d::Node;
 use hashbrown::{HashMap, HashSet};
 use ndarray::{Array1, ArrayView1, array};
 
@@ -49,6 +48,12 @@ pub struct FlowInBoundary {
 #[derive(Clone, Debug)]
 pub struct FlowOutBoundary {
     pub iedges: Vec<usize>,
+}
+#[derive(Clone, Debug)]
+pub struct Node {
+    pub x: f64,
+    pub y: f64,
+    pub parents: Vec<usize>,
 }
 #[derive(Clone, Debug)]
 pub struct Edge {
@@ -125,7 +130,6 @@ pub struct TriangleElement {
     pub inodes: [usize; 3],
     pub iedges: [usize; 3],
     pub ineighbors: Vec<usize>,
-    pub original_area: f64,
     // pub ref_distortion: f64,
 }
 impl Element2d for TriangleElement {
@@ -168,9 +172,16 @@ pub struct SubMesh2d {
     pub elements: Array<Element2d, Ix1>,
 }
 */
+// Mapping from the canonical element to the reference element
+pub struct CanonicalMap {
+    pub jacobian: [f64; 4],
+    pub jacobian_inv: [f64; 4],
+    pub det: f64,
+}
 #[derive(Clone)]
 pub struct Mesh2d<T: Element2d> {
-    pub nodes: Vec<Status<Node>>,
+    pub ref_nodes: Vec<Status<Node>>,
+    pub phys_nodes: Vec<Status<Node>>,
     pub edges: Vec<Status<Edge>>,
     pub elements: Vec<Status<T>>,
     pub boundaries: Boundaries,
@@ -195,13 +206,13 @@ impl<T: Element2d> Mesh2d<T> {
             if old_dof_idx < n_nodes {
                 // This is an X-DOF
                 let node_idx = old_dof_idx;
-                if let Status::Active(node) = &mut self.nodes[node_idx] {
+                if let Status::Active(node) = &mut self.phys_nodes[node_idx] {
                     node.x += alpha * delta_val;
                 }
             } else {
                 // This is a Y-DOF
                 let node_idx = old_dof_idx - n_nodes;
-                if let Status::Active(node) = &mut self.nodes[node_idx] {
+                if let Status::Active(node) = &mut self.phys_nodes[node_idx] {
                     node.y += alpha * delta_val;
                 }
             }
@@ -209,7 +220,6 @@ impl<T: Element2d> Mesh2d<T> {
     }
     pub fn rearrange_node_dofs(&self) -> Vec<usize> {
         let n_nodes = self.node_num;
-        let total_dofs = 2 * n_nodes;
 
         let num_interior = self.interior_nodes.len();
         let num_free_bnd_x = self.free_bnd_x.len();
@@ -266,7 +276,7 @@ impl<T: Element2d> Mesh2d<T> {
         println!("--- Free Node Coordinates ---");
 
         for &node_idx in free_nodes.iter() {
-            if let Status::Active(node) = &self.nodes[node_idx] {
+            if let Status::Active(node) = &self.phys_nodes[node_idx] {
                 let is_interior = self.interior_nodes.contains(&node_idx);
                 let free_x = is_interior || self.free_bnd_x.contains(&node_idx);
                 let free_y = is_interior || self.free_bnd_y.contains(&node_idx);
@@ -416,60 +426,51 @@ impl Mesh2d<QuadrilateralElement> {
 */
 impl Mesh2d<TriangleElement> {
     pub fn create_eight_tri_mesh() -> Mesh2d<TriangleElement> {
-        let nodes = vec![
+        let ref_nodes = vec![
             Status::Active(Node {
                 x: 0.0,
                 y: 0.0,
                 parents: vec![0, 1],
-                local_ids: vec![0, 0],
             }),
             Status::Active(Node {
                 x: 0.5,
                 y: 0.0,
                 parents: vec![0, 2, 3],
-                local_ids: vec![1, 0, 0],
             }),
             Status::Active(Node {
                 x: 1.0,
                 y: 0.0,
                 parents: vec![2],
-                local_ids: vec![1],
             }),
             Status::Active(Node {
                 x: 0.0,
                 y: 0.5,
                 parents: vec![1, 4, 5],
-                local_ids: vec![2, 0, 0],
             }),
             Status::Active(Node {
                 x: 0.5,
                 y: 0.5,
                 parents: vec![0, 1, 3, 4, 6, 7],
-                local_ids: vec![2, 1, 2, 1, 0, 0],
             }),
             Status::Active(Node {
                 x: 1.0,
                 y: 0.5,
                 parents: vec![2, 3, 6],
-                local_ids: vec![2, 1, 1],
             }),
             Status::Active(Node {
                 x: 0.0,
                 y: 1.0,
                 parents: vec![5],
-                local_ids: vec![2],
             }),
             Status::Active(Node {
                 x: 0.5,
                 y: 1.0,
                 parents: vec![4, 5, 7],
-                local_ids: vec![2, 1, 2],
             }),
             Status::Active(Node {
                 x: 1.0,
                 y: 1.0,
                 parents: vec![6, 7],
-                local_ids: vec![2, 1],
             }),
         ];
 
@@ -599,56 +600,51 @@ impl Mesh2d<TriangleElement> {
                 inodes: [0, 1, 4],
                 iedges: [0, 7, 12],
                 ineighbors: vec![3, 1],
-                original_area: 0.125,
             }),
             Status::Active(TriangleElement {
                 inodes: [0, 4, 3],
                 iedges: [12, 2, 6],
                 ineighbors: vec![0, 4],
-                original_area: 0.125,
             }),
             Status::Active(TriangleElement {
                 inodes: [1, 2, 5],
                 iedges: [1, 8, 13],
                 ineighbors: vec![3],
-                original_area: 0.125,
             }),
             Status::Active(TriangleElement {
                 inodes: [1, 5, 4],
                 iedges: [13, 3, 7],
                 ineighbors: vec![2, 6, 0],
-                original_area: 0.125,
             }),
             Status::Active(TriangleElement {
                 inodes: [3, 4, 7],
                 iedges: [2, 10, 14],
                 ineighbors: vec![1, 7, 5],
-                original_area: 0.125,
             }),
             Status::Active(TriangleElement {
                 inodes: [3, 7, 6],
                 iedges: [14, 4, 9],
                 ineighbors: vec![4],
-                original_area: 0.125,
             }),
             Status::Active(TriangleElement {
                 inodes: [4, 5, 8],
                 iedges: [3, 11, 15],
                 ineighbors: vec![3, 7],
-                original_area: 0.125,
             }),
             Status::Active(TriangleElement {
                 inodes: [4, 8, 7],
                 iedges: [15, 5, 10],
                 ineighbors: vec![6, 4],
-                original_area: 0.125,
             }),
         ];
         let free_bnd_x = vec![7];
         let free_bnd_y = vec![3, 5];
         let interior_nodes = vec![4];
+
+        let phys_nodes = ref_nodes.clone();
         let mesh = Mesh2d {
-            nodes,
+            ref_nodes,
+            phys_nodes,
             edges,
             elements,
             boundaries: Boundaries {
@@ -676,17 +672,16 @@ impl Mesh2d<TriangleElement> {
         n_order: usize,
     ) -> Mesh2d<TriangleElement> {
         let node_num = x_num * y_num;
-        let mut nodes = Vec::with_capacity(node_num);
+        let mut ref_nodes = Vec::with_capacity(node_num);
         let hx = (x1 - x0) / (x_num - 1) as f64;
         let hy = (y1 - y0) / (y_num - 1) as f64;
 
         for i in 0..y_num {
             for j in 0..x_num {
-                nodes.push(Status::Active(Node {
+                ref_nodes.push(Status::Active(Node {
                     x: x0 + j as f64 * hx,
                     y: y0 + i as f64 * hy,
                     parents: Vec::new(),
-                    local_ids: Vec::new(),
                 }));
             }
         }
@@ -703,37 +698,25 @@ impl Mesh2d<TriangleElement> {
                 let tl = (i + 1) * x_num + j;
                 let tr = (i + 1) * x_num + j + 1;
 
-                let p_bl = nodes[bl].as_ref();
-                let p_br = nodes[br].as_ref();
-                let p_tl = nodes[tl].as_ref();
-                let p_tr = nodes[tr].as_ref();
-
-                let area1 = 0.5
-                    * ((p_br.x - p_bl.x) * (p_tr.y - p_bl.y)
-                        - (p_tr.x - p_bl.x) * (p_br.y - p_bl.y));
+                // Triangle 1: [br, tr, bl] - right angle at br, counterclockwise
                 elements.push(Status::Active(TriangleElement {
-                    inodes: [bl, br, tr],
+                    inodes: [br, tr, bl],
                     iedges: [0; 3],
                     ineighbors: vec![],
-                    original_area: area1,
                 }));
 
-                let area2 = 0.5
-                    * ((p_tr.x - p_bl.x) * (p_tl.y - p_bl.y)
-                        - (p_tl.x - p_bl.x) * (p_tr.y - p_bl.y));
+                // Triangle 2: [tl, bl, tr] - right angle at tl, counterclockwise
                 elements.push(Status::Active(TriangleElement {
-                    inodes: [bl, tr, tl],
+                    inodes: [tl, bl, tr],
                     iedges: [0; 3],
                     ineighbors: vec![],
-                    original_area: area2,
                 }));
             }
         }
 
         for (elem_idx, element) in elements.iter().enumerate() {
-            for (local_id, &inode) in element.as_ref().inodes.iter().enumerate() {
-                nodes[inode].as_mut().parents.push(elem_idx);
-                nodes[inode].as_mut().local_ids.push(local_id);
+            for &inode in element.as_ref().inodes.iter() {
+                ref_nodes[inode].as_mut().parents.push(elem_idx);
             }
         }
 
@@ -860,14 +843,14 @@ impl Mesh2d<TriangleElement> {
         let lower_bnd_condition = FunctionBoundary {
             inodes: bottom_nodes,
             iedges: bottom_edges,
-            func: burgers_bnd_condition_2,
+            func: burgers_bnd_condition,
             position: BoundaryPosition::Lower,
         };
 
         let right_bnd_condition = ConstantBoundary {
             inodes: right_nodes,
             iedges: right_edges,
-            value: burgers_bnd_condition_2(1.0, 0.0),
+            value: burgers_bnd_condition(1.0, 0.0),
             position: BoundaryPosition::Right,
         };
 
@@ -880,7 +863,7 @@ impl Mesh2d<TriangleElement> {
         let left_bnd_condition = ConstantBoundary {
             inodes: left_nodes,
             iedges: left_edges,
-            value: burgers_bnd_condition_2(-1.0, 0.0),
+            value: burgers_bnd_condition(0.0, 0.0),
             position: BoundaryPosition::Left,
         };
 
@@ -935,8 +918,10 @@ impl Mesh2d<TriangleElement> {
         free_bnd_y.sort();
         interior_nodes.sort();
 
+        let phys_nodes = ref_nodes.clone();
         Mesh2d {
-            nodes,
+            ref_nodes,
+            phys_nodes,
             edges,
             elements,
             boundaries,
@@ -963,32 +948,46 @@ impl Mesh2d<TriangleElement> {
             // This is done in a single pass to avoid re-scanning the element list.
             for (elem_idx, element) in self.elements.iter().enumerate() {
                 if let Status::Active(element) = element {
-                    let p = [
-                        self.nodes[element.inodes[0]].as_ref(),
-                        self.nodes[element.inodes[1]].as_ref(),
-                        self.nodes[element.inodes[2]].as_ref(),
+                    let phys_nodes = [
+                        self.phys_nodes[element.inodes[0]].as_ref(),
+                        self.phys_nodes[element.inodes[1]].as_ref(),
+                        self.phys_nodes[element.inodes[2]].as_ref(),
                     ];
-                    let area = 0.5
-                        * ((p[1].x - p[0].x) * (p[2].y - p[0].y)
-                            - (p[2].x - p[0].x) * (p[1].y - p[0].y));
+                    let ref_nodes = [
+                        self.ref_nodes[element.inodes[0]].as_ref(),
+                        self.ref_nodes[element.inodes[1]].as_ref(),
+                        self.ref_nodes[element.inodes[2]].as_ref(),
+                    ];
+                    let phys_area = 0.5
+                        * ((phys_nodes[1].x - phys_nodes[0].x)
+                            * (phys_nodes[2].y - phys_nodes[0].y)
+                            - (phys_nodes[2].x - phys_nodes[0].x)
+                                * (phys_nodes[1].y - phys_nodes[0].y));
+                    let ref_area = 0.5
+                        * ((ref_nodes[1].x - ref_nodes[0].x) * (ref_nodes[2].y - ref_nodes[0].y)
+                            - (ref_nodes[2].x - ref_nodes[0].x)
+                                * (ref_nodes[1].y - ref_nodes[0].y));
                     // A negative area indicates different winding order, but its magnitude is what matters.
-                    if area <= 1e-12 {
-                        println!("Found degenerate element: {}, area: {}", elem_idx, area);
+                    if phys_area <= 1e-12 {
+                        println!(
+                            "Found degenerate element: {}, area: {}",
+                            elem_idx, phys_area
+                        );
                         element_to_collapse = Some(elem_idx);
                         break; // Found a degenerate element, collapse it immediately.
                     }
 
                     // If no small element has been found yet, and this one qualifies, store it.
                     // We continue scanning in case we find a fully degenerate element later.
-                    let area_ratio = if element.original_area > 1e-12 {
-                        area / element.original_area
+                    let area_ratio = if ref_area > 1e-12 {
+                        phys_area / ref_area
                     } else {
                         1.0 // Avoid division by zero; treat as no change.
                     };
                     if first_small_element_found.is_none() && area_ratio < min_area_ratio {
                         println!(
                             "Found small element: {}, area ratio: {}, original area: {}, area: {}",
-                            elem_idx, area_ratio, element.original_area, area
+                            elem_idx, area_ratio, ref_area, phys_area
                         );
                         first_small_element_found = Some(elem_idx);
                     }
@@ -1005,9 +1004,9 @@ impl Mesh2d<TriangleElement> {
                 let element = self.elements[elem_idx].as_ref();
                 let p_indices = element.inodes;
                 let p = [
-                    self.nodes[p_indices[0]].as_ref(),
-                    self.nodes[p_indices[1]].as_ref(),
-                    self.nodes[p_indices[2]].as_ref(),
+                    self.phys_nodes[p_indices[0]].as_ref(),
+                    self.phys_nodes[p_indices[1]].as_ref(),
+                    self.phys_nodes[p_indices[2]].as_ref(),
                 ];
 
                 // Find the shortest edge of the element. This is the edge we will collapse.
@@ -1075,9 +1074,9 @@ impl Mesh2d<TriangleElement> {
                         } else {
                             // Both are on the same number of boundaries (e.g., both on one line, or both corners).
                             // Collapse the shorter of the other two edges. This improves element quality.
-                            let p_other = self.nodes[other_v_idx].as_ref();
-                            let p1 = self.nodes[v1_idx].as_ref();
-                            let p2 = self.nodes[v2_idx].as_ref();
+                            let p_other = self.phys_nodes[other_v_idx].as_ref();
+                            let p1 = self.phys_nodes[v1_idx].as_ref();
+                            let p2 = self.phys_nodes[v2_idx].as_ref();
                             let l_sq_1_other =
                                 (p1.x - p_other.x).powi(2) + (p1.y - p_other.y).powi(2);
                             let l_sq_2_other =
@@ -1092,9 +1091,9 @@ impl Mesh2d<TriangleElement> {
                     // Case 3: Both vertices are in the interior.
                     // Use the "collapse to longest opposite edge" heuristic to improve quality.
                     (false, false) => {
-                        let p_other = self.nodes[other_v_idx].as_ref();
-                        let p1 = self.nodes[v1_idx].as_ref();
-                        let p2 = self.nodes[v2_idx].as_ref();
+                        let p_other = self.phys_nodes[other_v_idx].as_ref();
+                        let p1 = self.phys_nodes[v1_idx].as_ref();
+                        let p2 = self.phys_nodes[v2_idx].as_ref();
                         let l_sq_1_other = (p1.x - p_other.x).powi(2) + (p1.y - p_other.y).powi(2);
                         let l_sq_2_other = (p2.x - p_other.x).powi(2) + (p2.y - p_other.y).powi(2);
                         if l_sq_1_other > l_sq_2_other {
@@ -1121,14 +1120,14 @@ impl Mesh2d<TriangleElement> {
         new_to_old_elem: &mut Vec<usize>,
     ) {
         // --- 1. Identify affected and collapsed elements ---
-        let parents_from: HashSet<usize> = self.nodes[v_from_idx]
+        let parents_from: HashSet<usize> = self.ref_nodes[v_from_idx]
             .as_ref()
             .parents
             .iter()
             .cloned()
             .collect();
         dbg!(&parents_from);
-        let parents_to: HashSet<usize> = self.nodes[v_to_idx]
+        let parents_to: HashSet<usize> = self.ref_nodes[v_to_idx]
             .as_ref()
             .parents
             .iter()
@@ -1229,11 +1228,12 @@ impl Mesh2d<TriangleElement> {
                     .cloned()
                     .collect();
                 new_parents.sort();
-                self.nodes[v_to_idx].as_mut().parents = new_parents;
+                self.ref_nodes[v_to_idx].as_mut().parents = new_parents.clone();
+                self.phys_nodes[v_to_idx].as_mut().parents = new_parents;
 
                 // Update parents of the local_other node
                 let other_node_idx = element.as_ref().inodes[local_other];
-                let other_node = self.nodes[other_node_idx].as_mut();
+                let other_node = self.ref_nodes[other_node_idx].as_mut();
                 other_node.parents.retain(|&p| p != elem_idx);
 
                 // Update the neighbors' connectivity.
@@ -1381,6 +1381,7 @@ impl Mesh2d<TriangleElement> {
         self.boundaries.open.iter_mut().for_each(|bnd| {
             bnd.inodes.retain(|&node| node != v_from_idx);
         });
-        self.nodes[v_from_idx].mark_as_removed();
+        self.ref_nodes[v_from_idx].mark_as_removed();
+        self.phys_nodes[v_from_idx].mark_as_removed();
     }
 }

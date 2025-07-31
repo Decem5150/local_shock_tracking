@@ -1,4 +1,4 @@
-use crate::disc::{basis::Basis, gauss_points::lobatto_points::get_lobatto_points_interval};
+use crate::disc::{basis::Basis1D, gauss_points::lobatto_points::get_lobatto_points_interval};
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use ndarray_linalg::Inverse;
 
@@ -119,26 +119,4 @@ impl LobattoBasis {
     }
     */
 }
-impl Basis for LobattoBasis {
-    fn vandermonde2d(_n: usize, _r: ArrayView1<f64>, _s: ArrayView1<f64>) -> Array2<f64> {
-        unimplemented!()
-    }
-    fn grad_vandermonde_2d(
-        _n: usize,
-        _r: ArrayView1<f64>,
-        _s: ArrayView1<f64>,
-    ) -> (Array2<f64>, Array2<f64>) {
-        unimplemented!()
-    }
-    fn nodes2d(_n: usize) -> (Array1<f64>, Array1<f64>) {
-        unimplemented!()
-    }
-    fn dmatrices_2d(
-        _n: usize,
-        _r: ArrayView1<f64>,
-        _s: ArrayView1<f64>,
-        _v: ArrayView2<f64>,
-    ) -> (Array2<f64>, Array2<f64>) {
-        unimplemented!()
-    }
-}
+impl Basis1D for LobattoBasis {}
