@@ -7,9 +7,9 @@ use std::f64::consts::PI;
 
 use ndarray::Array2;
 
-use crate::disc::basis::lagrange1d::LobattoBasis;
-use crate::disc::basis::quadrilateral::QuadrilateralBasis;
-use crate::disc::basis::triangle::TriangleBasis;
+use crate::disc::dg_basis::lagrange1d::LobattoBasis;
+use crate::disc::dg_basis::quadrilateral::QuadrilateralBasis;
+use crate::disc::dg_basis::triangle::TriangleBasis;
 use crate::disc::boundary::scalar1d::burgers_bnd_condition_2;
 // use crate::disc::burgers1d::Disc1dBurgers;
 use crate::disc::burgers1d_space_time::Disc1dBurgers1dSpaceTime;

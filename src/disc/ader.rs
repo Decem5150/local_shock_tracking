@@ -2,8 +2,9 @@ use ndarray::{Array1, Array2, ArrayView1, ArrayView2, linalg::kron, s};
 use ndarray_linalg::Inverse;
 
 use crate::disc::{
-    basis::{
-        Basis1D, lagrange1d::LobattoBasis, quadrilateral::QuadrilateralBasis, triangle::TriangleBasis,
+    dg_basis::{
+        Basis1D, lagrange1d::LobattoBasis, quadrilateral::QuadrilateralBasis,
+        triangle::TriangleBasis,
     },
     mesh::mesh2d::{Mesh2d, TriangleElement},
 };

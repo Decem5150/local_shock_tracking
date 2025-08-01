@@ -5,7 +5,6 @@ use faer_ext::{IntoFaer, IntoNdarray};
 use flux::space_time_flux1d;
 use ndarray::{Array, Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, array, s};
 use ndarray_stats::QuantileExt;
-use std::autodiff::autodiff_reverse;
 
 use super::{
     basis::lagrange1d::LagrangeBasis1DLobatto,

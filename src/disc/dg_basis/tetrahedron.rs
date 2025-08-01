@@ -4,7 +4,7 @@ use ndarray::{Array, Array1, Array2, ArrayView1, ArrayView2, Axis, Zip, array, s
 use ndarray_linalg::{Inverse, Norm, Solve};
 
 use crate::disc::{
-    basis::{Basis1D, Basis3D, lagrange1d::LobattoBasis, triangle::TriangleBasis},
+    dg_basis::{Basis1D, Basis3D, lagrange1d::LobattoBasis, triangle::TriangleBasis},
     gauss_points::lobatto_points::get_lobatto_points_interval,
 };
 

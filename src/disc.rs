@@ -1,5 +1,6 @@
 pub mod ader;
-pub mod basis;
+pub mod cg_basis;
+pub mod dg_basis;
 pub mod boundary;
 // pub mod flux;
 pub mod finite_difference;
@@ -26,7 +27,7 @@ use ndarray_stats::QuantileExt;
 
 use crate::{
     disc::{
-        basis::{Basis1D, lagrange1d::LobattoBasis, triangle::TriangleBasis},
+        dg_basis::{Basis1D, lagrange1d::LobattoBasis, triangle::TriangleBasis},
         finite_difference::{
             FiniteDifference, compute_flux_scaling_derivatives, compute_numerical_flux_derivatives,
             compute_volume_derivatives,

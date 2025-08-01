@@ -2,7 +2,7 @@ use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, array, s};
 use ndarray_linalg::{Eigh, Inverse, Solve, UPLO};
 use statrs::function::gamma::gamma;
 
-use crate::disc::basis::{Basis1D, Basis2D};
+use crate::disc::dg_basis::{Basis1D, Basis2D};
 use crate::disc::gauss_points::lobatto_points::get_lobatto_points_interval;
 
 pub struct QuadrilateralBasis {

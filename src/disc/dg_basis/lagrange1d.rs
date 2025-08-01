@@ -1,4 +1,4 @@
-use crate::disc::{basis::Basis1D, gauss_points::lobatto_points::get_lobatto_points_interval};
+use crate::disc::{dg_basis::Basis1D, gauss_points::lobatto_points::get_lobatto_points_interval};
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use ndarray_linalg::Inverse;
 

@@ -4,7 +4,7 @@ use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, array, s};
 use ndarray_linalg::{Inverse, Solve};
 
 use crate::disc::{
-    basis::{Basis1D, Basis2D, lagrange1d::LobattoBasis},
+    dg_basis::{Basis1D, Basis2D, lagrange1d::LobattoBasis},
     gauss_points::lobatto_points::get_lobatto_points_interval,
 };
 pub struct TriangleBasis {

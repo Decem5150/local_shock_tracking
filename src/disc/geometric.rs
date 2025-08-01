@@ -1,4 +1,4 @@
-use crate::disc::basis::triangle::TriangleBasis;
+use crate::disc::dg_basis::triangle::TriangleBasis;
 
 pub trait Geometric1D {
     fn compute_ref_normal(local_id: usize) -> [f64; 2] {

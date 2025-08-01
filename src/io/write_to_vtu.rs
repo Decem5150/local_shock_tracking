@@ -13,7 +13,7 @@ use vtkio::{
 use once_cell::sync::Lazy;
 
 use crate::disc::{
-    basis::triangle::TriangleBasis,
+    dg_basis::triangle::TriangleBasis,
     mesh::mesh2d::{Mesh2d, Status, TriangleElement},
 };
 
