@@ -354,6 +354,23 @@ impl Basis3D for TetrahedronBasis {
 
         v
     }
+    fn grad_vandermonde_3d(
+        n: usize,
+        r: ArrayView1<f64>,
+        s: ArrayView1<f64>,
+        t: ArrayView1<f64>,
+    ) -> (Array2<f64>, Array2<f64>, Array2<f64>) {
+        todo!()
+    }
+    fn dmatrices_3d(
+        n: usize,
+        r: ArrayView1<f64>,
+        s: ArrayView1<f64>,
+        t: ArrayView1<f64>,
+        v: ArrayView2<f64>,
+    ) -> (Array2<f64>, Array2<f64>, Array2<f64>) {
+        todo!()
+    }
 }
 /*
 function warp = evalwarp(p, xnodes, xout)

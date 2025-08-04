@@ -1,7 +1,7 @@
 pub mod ader;
+pub mod boundary;
 pub mod cg_basis;
 pub mod dg_basis;
-pub mod boundary;
 // pub mod flux;
 pub mod finite_difference;
 pub mod gauss_points;
@@ -12,6 +12,7 @@ pub mod mesh;
 // pub mod advection1d_space_time_tri;
 // pub mod burgers1d;
 pub mod burgers1d_space_time;
+pub mod linear_elliptic;
 pub mod space_time_1d_scalar;
 pub mod space_time_1d_system;
 // pub mod euler1d;

@@ -4,7 +4,7 @@ use ndarray::{
 };
 
 use crate::disc::{
-    dg_basis::{Basis1D, lagrange1d::LobattoBasis, triangle::TriangleBasis},
+    dg_basis::{Basis1D, Basis2D, lagrange1d::LobattoBasis, triangle::TriangleBasis},
     finite_difference::{
         FiniteDifference, compute_flux_scaling_derivatives, compute_numerical_flux_derivatives,
         compute_volume_derivatives,
