@@ -17,7 +17,13 @@ impl LinearElliptic {
                     std::array::from_fn(|i| mesh.ref_nodes[elem.inodes[i]].as_ref().y);
                 let area = Self::compute_element_area(&x, &y);
                 let k = min_area / area;
-                for igp in self.
+                for igp in basis.dxi_cub.len() {
+                    let l1 = basis.cub_xi[igp];
+                    let l2 = basis.cub_eta[igp];
+                    let l3 = 1.0 - l1 - l2;
+                    let (jacob_det, jacob_inv_t) = Self::evaluate_jacob(1, l1, l2, l3, &x, &y);
+                    let 
+                }
             }
         }
         stiffness
