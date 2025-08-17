@@ -21,7 +21,7 @@ impl LobattoBasis {
         let vandermonde = Self::vandermonde1d(n, xi_map.view());
         let inv_vandermonde = vandermonde.inv().unwrap();
         let dxi = Self::dmatrix_1d(n, xi.view(), vandermonde.view());
-        println!("dxi: {:?}", dxi);
+        println!("dxi: {dxi}");
         LobattoBasis {
             n,
             xi,
@@ -42,20 +42,17 @@ impl LobattoBasis {
 
         let xi_map = xi.mapv(|x| 2. * x - 1.);
 
-        let mut sk = 0;
         for i in 0..n_basis_1d {
             let mut dp_i_xi = Self::grad_jacobi_polynomial(xi_map.view(), 0.0, 0.0, i as i32);
             dp_i_xi.mapv_inplace(|val| val * 2.0);
-            vxi.column_mut(sk).assign(&dp_i_xi);
-            sk += 1;
+            vxi.column_mut(i).assign(&dp_i_xi);
         }
         vxi
     }
     fn dmatrix_1d(n: usize, xi: ArrayView1<f64>, v: ArrayView2<f64>) -> Array2<f64> {
         let vxi = Self::grad_vandermonde_1d(n, xi);
         let inv_v = v.inv().unwrap();
-        let dxi = vxi.dot(&inv_v);
-        dxi
+        vxi.dot(&inv_v)
     }
     /*
     pub fn evaluate_basis_at(&self, i: usize, x: f64) -> f64 {

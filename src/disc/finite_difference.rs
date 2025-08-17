@@ -1,5 +1,7 @@
 use ndarray::{Array1, Array2};
 
+use crate::disc::dg_basis::triangle::TriangleBasis;
+
 /// Finite difference module for computing derivatives of functions
 /// that were previously computed using automatic differentiation.
 ///
@@ -108,7 +110,57 @@ impl FiniteDifference {
         }
     }
 }
+pub fn compute_distortion_derivatives<F>(
+    fd: &FiniteDifference,
+    distortion_fn: F,
+    x: &[f64],
+    y: &[f64],
+    d_x: &mut [f64],
+    d_y: &mut [f64],
+    basis: &TriangleBasis,
+) -> f64
+where
+    F: Fn(&[f64], &[f64], &TriangleBasis) -> f64,
+{
+    let base_value = distortion_fn(x, y, basis);
 
+    let mut x_perturbed = x.to_vec();
+    let mut y_perturbed = y.to_vec();
+
+    // Compute derivatives with respect to x coordinates
+    for i in 0..x.len() {
+        let h = fd.compute_step_size(x[i]);
+        let x_orig = x[i];
+
+        x_perturbed[i] = x_orig + h;
+        let f_plus = distortion_fn(&x_perturbed, y, basis);
+
+        x_perturbed[i] = x_orig - h;
+        let f_minus = distortion_fn(&x_perturbed, y, basis);
+
+        x_perturbed[i] = x_orig;
+
+        d_x[i] = (f_plus - f_minus) / (2.0 * h);
+    }
+
+    // Compute derivatives with respect to y coordinates
+    for i in 0..y.len() {
+        let h = fd.compute_step_size(y[i]);
+        let y_orig = y[i];
+
+        y_perturbed[i] = y_orig + h;
+        let f_plus = distortion_fn(x, &y_perturbed, basis);
+
+        y_perturbed[i] = y_orig - h;
+        let f_minus = distortion_fn(x, &y_perturbed, basis);
+
+        y_perturbed[i] = y_orig;
+
+        d_y[i] = (f_plus - f_minus) / (2.0 * h);
+    }
+
+    base_value
+}
 /// Example implementation for the volume integral derivative computation
 /// This replaces the autodiff-generated dvolume function
 #[allow(clippy::too_many_arguments)]

@@ -15,10 +15,10 @@ use crate::disc::{
 
 pub trait SpaceTime1DScalar: Geometric2D {
     fn basis(&self) -> &TriangleBasis;
-    fn enriched_basis(&self) -> &TriangleBasis;
-    fn interp_node_to_cubature(&self) -> &Array2<f64>;
-    fn interp_node_to_enriched_cubature(&self) -> &Array2<f64>;
-    fn interp_node_to_enriched_quadrature(&self) -> &Array2<f64>;
+    fn enr_basis(&self) -> &TriangleBasis;
+    fn phi_q(&self) -> &Array2<f64>;
+    fn phi_qe(&self) -> &Array2<f64>;
+    fn phi_edge_qe(&self) -> &Array2<f64>;
     // fn mesh(&self) -> &Mesh2d<TriangleElement>;
     // fn mesh_mut(&mut self) -> &mut Mesh2d<TriangleElement>;
 
@@ -48,7 +48,7 @@ pub trait SpaceTime1DScalar: Geometric2D {
     ) {
         let basis = {
             if is_enriched {
-                &self.enriched_basis()
+                &self.enr_basis()
             } else {
                 &self.basis()
             }
@@ -64,11 +64,9 @@ pub trait SpaceTime1DScalar: Geometric2D {
                 let phys_y: [f64; 3] =
                     std::array::from_fn(|i| mesh.phys_nodes[inodes[i]].as_ref().y);
                 let interp_sol = if is_enriched {
-                    self.interp_node_to_enriched_cubature()
-                        .dot(&solutions.slice(s![ielem, ..]))
+                    self.phi_qe().dot(&solutions.slice(s![ielem, ..]))
                 } else {
-                    self.interp_node_to_cubature()
-                        .dot(&solutions.slice(s![ielem, ..]))
+                    self.phi_q().dot(&solutions.slice(s![ielem, ..]))
                 };
                 for itest_func in 0..ncell_basis {
                     let res = self.volume_integral(
@@ -125,10 +123,8 @@ pub trait SpaceTime1DScalar: Geometric2D {
                     );
                     if is_enriched {
                         (
-                            self.interp_node_to_enriched_quadrature()
-                                .dot(&left_sol_slice),
-                            self.interp_node_to_enriched_quadrature()
-                                .dot(&right_sol_slice),
+                            self.phi_edge_qe().dot(&left_sol_slice),
+                            self.phi_edge_qe().dot(&right_sol_slice),
                         )
                     } else {
                         (left_sol_slice, right_sol_slice)
@@ -227,7 +223,7 @@ pub trait SpaceTime1DScalar: Geometric2D {
                                 .unwrap(),
                         );
                         if is_enriched {
-                            self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                            self.phi_edge_qe().dot(&sol_slice)
                         } else {
                             sol_slice
                         }
@@ -295,7 +291,7 @@ pub trait SpaceTime1DScalar: Geometric2D {
                                 .unwrap(),
                         );
                         if is_enriched {
-                            self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                            self.phi_edge_qe().dot(&sol_slice)
                         } else {
                             sol_slice
                         }
@@ -463,7 +459,7 @@ pub trait SpaceTime1DScalar: Geometric2D {
                                 .unwrap(),
                         );
                         if is_enriched {
-                            self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                            self.phi_edge_qe().dot(&sol_slice)
                         } else {
                             sol_slice
                         }
@@ -520,7 +516,7 @@ pub trait SpaceTime1DScalar: Geometric2D {
         let fd = FiniteDifference::new();
         let basis = {
             if is_enriched {
-                &self.enriched_basis()
+                &self.enr_basis()
             } else {
                 &self.basis()
             }
@@ -536,9 +532,9 @@ pub trait SpaceTime1DScalar: Geometric2D {
                 let phys_y: [f64; 3] =
                     std::array::from_fn(|i| mesh.phys_nodes[inodes[i]].as_ref().y);
                 let interp_matrix = if is_enriched {
-                    &self.interp_node_to_enriched_cubature()
+                    &self.phi_qe()
                 } else {
-                    &self.interp_node_to_cubature()
+                    &self.phi_q()
                 };
                 let interp_sol = interp_matrix.dot(&solutions.slice(s![ielem, ..]));
                 for itest_func in 0..ncell_basis {
@@ -623,10 +619,8 @@ pub trait SpaceTime1DScalar: Geometric2D {
                     );
                     if is_enriched {
                         (
-                            self.interp_node_to_enriched_quadrature()
-                                .dot(&left_sol_slice),
-                            self.interp_node_to_enriched_quadrature()
-                                .dot(&right_sol_slice),
+                            self.phi_edge_qe().dot(&left_sol_slice),
+                            self.phi_edge_qe().dot(&right_sol_slice),
                         )
                     } else {
                         (left_sol_slice, right_sol_slice)
@@ -785,11 +779,11 @@ pub trait SpaceTime1DScalar: Geometric2D {
                         {
                             dsol[(ilelem, left_itest_func, ilelem, isol_node)] += left_cano_length
                                 * edge_weights[i]
-                                * self.interp_node_to_enriched_quadrature()[(i, j)]
+                                * self.phi_edge_qe()[(i, j)]
                                 * dleft_transformed_flux_dul;
                             dsol[(irelem, right_itest_func, irelem, isol_node)] += right_cano_length
                                 * edge_weights[i]
-                                * self.interp_node_to_enriched_quadrature()[(i, j)]
+                                * self.phi_edge_qe()[(i, j)]
                                 * dright_transformed_flux_dul;
                         }
                         // derivatives w.r.t. right value
@@ -799,13 +793,11 @@ pub trait SpaceTime1DScalar: Geometric2D {
                         {
                             dsol[(ilelem, left_itest_func, ilelem, isol_node)] += left_cano_length
                                 * edge_weights[i]
-                                * self.interp_node_to_enriched_quadrature()
-                                    [(nedge_basis - 1 - i, j)]
+                                * self.phi_edge_qe()[(nedge_basis - 1 - i, j)]
                                 * dleft_transformed_flux_dur;
                             dsol[(irelem, right_itest_func, irelem, isol_node)] += right_cano_length
                                 * edge_weights[i]
-                                * self.interp_node_to_enriched_quadrature()
-                                    [(nedge_basis - 1 - i, j)]
+                                * self.phi_edge_qe()[(nedge_basis - 1 - i, j)]
                                 * dright_transformed_flux_dur;
                         }
                     } else {
@@ -861,7 +853,7 @@ pub trait SpaceTime1DScalar: Geometric2D {
                                 .unwrap(),
                         );
                         if is_enriched {
-                            self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                            self.phi_edge_qe().dot(&sol_slice)
                         } else {
                             sol_slice
                         }
@@ -1046,7 +1038,7 @@ pub trait SpaceTime1DScalar: Geometric2D {
                             {
                                 dsol[(ielem, itest_func, ielem, isol_node)] += cano_length
                                     * edge_weights[i]
-                                    * self.interp_node_to_enriched_quadrature()[(i, j)]
+                                    * self.phi_edge_qe()[(i, j)]
                                     * dtransformed_flux_du;
                             }
                         } else {
@@ -1086,7 +1078,7 @@ pub trait SpaceTime1DScalar: Geometric2D {
                                 .unwrap(),
                         );
                         if is_enriched {
-                            self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                            self.phi_edge_qe().dot(&sol_slice)
                         } else {
                             sol_slice
                         }
@@ -1278,7 +1270,7 @@ pub trait SpaceTime1DScalar: Geometric2D {
                             {
                                 dsol[(ielem, itest_func, ielem, isol_node)] += cano_length
                                     * edge_weights[i]
-                                    * self.interp_node_to_enriched_quadrature()[(i, j)]
+                                    * self.phi_edge_qe()[(i, j)]
                                     * dtransformed_flux_du;
                             }
                         } else {
@@ -1529,7 +1521,7 @@ pub trait SpaceTime1DScalar: Geometric2D {
                                 .unwrap(),
                         );
                         if is_enriched {
-                            self.interp_node_to_enriched_quadrature().dot(&sol_slice)
+                            self.phi_edge_qe().dot(&sol_slice)
                         } else {
                             sol_slice
                         }
@@ -1621,8 +1613,8 @@ pub trait SpaceTime1DScalar: Geometric2D {
 
                         let itest_func = basis.nodes_along_edges[(local_edge_ids[0], i)];
                         if ielem == 1 {
-                            println!("boundary_flux: {:?}", boundary_flux);
-                            println!("transformed_flux: {:?}", transformed_flux);
+                            println!("boundary_flux: {boundary_flux}");
+                            println!("transformed_flux: {transformed_flux}");
                         }
                         residuals[(ielem, itest_func)] +=
                             cano_length * edge_weights[i] * transformed_flux;
@@ -1641,7 +1633,7 @@ pub trait SpaceTime1DScalar: Geometric2D {
                             {
                                 dsol[(ielem, itest_func, ielem, isol_node)] += cano_length
                                     * edge_weights[i]
-                                    * self.interp_node_to_enriched_quadrature()[(i, j)]
+                                    * self.phi_edge_qe()[(i, j)]
                                     * dtransformed_flux_du;
                             }
                         } else {
@@ -1650,67 +1642,6 @@ pub trait SpaceTime1DScalar: Geometric2D {
                                 cano_length * edge_weights[i] * dtransformed_flux_du;
                         }
                     }
-                }
-            }
-        }
-    }
-    fn compute_mesh_distortion_deviation(
-        &self,
-        res_mesh: &mut Array1<f64>,
-        dres_mesh_dx: &mut Array2<f64>,
-        dres_mesh_dy: &mut Array2<f64>,
-        mesh: &Mesh2d<TriangleElement>,
-    ) {
-        let ref_x = [0.0, 1.0, 0.0];
-        let ref_y = [0.0, 0.0, 1.0];
-        let ref_distortion = Self::compute_distortion(&ref_x, &ref_y, self.basis());
-        for (elem_idx, element) in mesh.elements.iter().enumerate() {
-            if let Status::Active(element) = element {
-                let inodes = &element.inodes;
-                let x_slice: [f64; 3] =
-                    std::array::from_fn(|i| mesh.phys_nodes[inodes[i]].as_ref().x);
-                let y_slice: [f64; 3] =
-                    std::array::from_fn(|i| mesh.phys_nodes[inodes[i]].as_ref().y);
-                let distortion = Self::compute_distortion(&x_slice, &y_slice, self.basis());
-                res_mesh[elem_idx] = distortion - ref_distortion;
-
-                let mut distortion_x_perturbed = [0.0; 3];
-                let mut distortion_y_perturbed = [0.0; 3];
-                distortion_x_perturbed[0] = {
-                    let mut x_slice_perturbed = x_slice;
-                    x_slice_perturbed[0] += 1e-6;
-                    Self::compute_distortion(&x_slice_perturbed, &y_slice, self.basis())
-                };
-                distortion_x_perturbed[1] = {
-                    let mut x_slice_perturbed = x_slice;
-                    x_slice_perturbed[1] += 1e-6;
-                    Self::compute_distortion(&x_slice_perturbed, &y_slice, self.basis())
-                };
-                distortion_x_perturbed[2] = {
-                    let mut x_slice_perturbed = x_slice;
-                    x_slice_perturbed[2] += 1e-6;
-                    Self::compute_distortion(&x_slice_perturbed, &y_slice, self.basis())
-                };
-                distortion_y_perturbed[0] = {
-                    let mut y_slice_perturbed = y_slice;
-                    y_slice_perturbed[0] += 1e-6;
-                    Self::compute_distortion(&x_slice, &y_slice_perturbed, self.basis())
-                };
-                distortion_y_perturbed[1] = {
-                    let mut y_slice_perturbed = y_slice;
-                    y_slice_perturbed[1] += 1e-6;
-                    Self::compute_distortion(&x_slice, &y_slice_perturbed, self.basis())
-                };
-                distortion_y_perturbed[2] = {
-                    let mut y_slice_perturbed = y_slice;
-                    y_slice_perturbed[2] += 1e-6;
-                    Self::compute_distortion(&x_slice, &y_slice_perturbed, self.basis())
-                };
-                for j in 0..3 {
-                    dres_mesh_dx[(elem_idx, inodes[j])] =
-                        (distortion_x_perturbed[j] - distortion) / 1e-6;
-                    dres_mesh_dy[(elem_idx, inodes[j])] =
-                        (distortion_y_perturbed[j] - distortion) / 1e-6;
                 }
             }
         }
@@ -1833,7 +1764,7 @@ pub trait SpaceTime1DScalar: Geometric2D {
         initial_guess: ArrayView2<f64>,
     ) -> Array2<f64> {
         let ncell_basis = self.basis().xi.len();
-        let nelem = mesh.elem_num;
+        let nelem = mesh.elements.len();
         let mut solutions = Array2::zeros((nelem, ncell_basis));
 
         for ielem in 0..nelem {
@@ -1847,7 +1778,7 @@ pub trait SpaceTime1DScalar: Geometric2D {
     fn get_solutions_along_boundary(
         &self,
         mesh: &Mesh2d<TriangleElement>,
-        iedges: &Vec<usize>,
+        iedges: &[usize],
         solutions: &Array2<f64>,
     ) -> Array2<f64> {
         let sol_nodes_along_edges = &self.basis().nodes_along_edges;
@@ -1870,6 +1801,7 @@ pub trait SpaceTime1DScalar: Geometric2D {
         }
         bnd_solutions
     }
+    #[allow(clippy::too_many_arguments)]
     fn compute_boundary_value_by_interpolation(
         source_solution: &Array1<f64>,
         n: usize,                      // order of the source basis
@@ -1913,4 +1845,188 @@ pub trait SpaceTime1DScalar: Geometric2D {
         let interp_matrix = v.dot(inv_vandermonde);
         interp_matrix.dot(source_solution)
     }
+}
+
+pub trait P0Solver: Geometric2D + SpaceTime1DScalar {
+    fn compute_initial_guess(&self, mesh: &Mesh2d<TriangleElement>) -> Array2<f64> {
+        let mut solutions = Array2::zeros((mesh.elements.len(), 1));
+        self.initialize_solution(solutions.view_mut());
+        let nelem = mesh.elements.len();
+        let mut residuals = Array2::<f64>::zeros((nelem, 1));
+        let max_iter = 5000;
+        let tol = 1e-10;
+
+        for i in 0..max_iter {
+            self.compute_p0_residuals(mesh, solutions.view(), residuals.view_mut());
+
+            let res_norm = residuals.iter().map(|x| x.powi(2)).sum::<f64>().sqrt() / (nelem as f64);
+
+            if i % 100 == 0 {
+                dbg!(&residuals);
+                println!("solutions: {solutions}");
+                println!("PTC Iter: {i}, Res norm: {res_norm}");
+            }
+
+            if res_norm < tol {
+                println!("PTC converged after {i} iterations.");
+                println!("solutions: {solutions}");
+                return solutions;
+            }
+
+            let dts = self.compute_time_steps(mesh, solutions.view());
+            for ielem in 0..nelem {
+                if let Status::Active(elem) = &mesh.elements[ielem] {
+                    let phys_x: [f64; 3] =
+                        std::array::from_fn(|i| mesh.phys_nodes[elem.inodes[i]].as_ref().x);
+                    let phys_y: [f64; 3] =
+                        std::array::from_fn(|i| mesh.phys_nodes[elem.inodes[i]].as_ref().y);
+                    let area = Self::compute_element_area(&phys_x, &phys_y);
+                    solutions[[ielem, 0]] -= dts[ielem] / area * residuals[[ielem, 0]];
+                }
+            }
+            println!("iter: {i}");
+            // println!("p0_solutions: {:?}", solutions);
+        }
+        println!("PTC did not converge within {max_iter} iterations");
+        solutions
+    }
+
+    fn compute_p0_residuals(
+        &self,
+        mesh: &Mesh2d<TriangleElement>,
+        solutions: ArrayView2<f64>,
+        mut residuals: ArrayViewMut2<f64>,
+    ) {
+        residuals.fill(0.0);
+
+        // Internal edges
+        for &iedge in &mesh.interior_edges {
+            if let Status::Active(edge) = &mesh.edges[iedge] {
+                let ileft = edge.parents[0];
+                let iright = edge.parents[1];
+
+                let lelem = mesh.elements[ileft].as_ref();
+
+                let u_left = solutions[(ileft, 0)];
+                let u_right = solutions[(iright, 0)];
+
+                let local_ids = &edge.local_ids;
+                let n0 = mesh.phys_nodes[lelem.inodes[local_ids[0]]].as_ref();
+                let n1 = mesh.phys_nodes[lelem.inodes[(local_ids[0] + 1) % 3]].as_ref();
+
+                let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
+
+                let flux =
+                    self.compute_smoothed_numerical_flux(u_left, u_right, n0.x, n1.x, n0.y, n1.y);
+
+                residuals[(ileft, 0)] += flux * edge_length;
+                residuals[(iright, 0)] -= flux * edge_length;
+            }
+        }
+
+        // Constant boundaries
+        for bnd in &mesh.boundaries.constant {
+            let ub = bnd.value;
+            for &iedge in &bnd.iedges {
+                if let Status::Active(edge) = &mesh.edges[iedge] {
+                    let ielem = edge.parents[0];
+                    let elem = mesh.elements[ielem].as_ref();
+                    let u = solutions[(ielem, 0)];
+                    let local_id = edge.local_ids[0];
+                    let n0 = mesh.phys_nodes[elem.inodes[local_id]].as_ref();
+                    let n1 = mesh.phys_nodes[elem.inodes[(local_id + 1) % 3]].as_ref();
+                    let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
+
+                    // For boundary edges, the node ordering is assumed to be counter-clockwise
+                    // for the parent element, so the normal computed from (n0, n1) is outward-pointing.
+                    let flux = self.compute_smoothed_boundary_flux(u, ub, n0.x, n1.x, n0.y, n1.y);
+
+                    residuals[(ielem, 0)] += flux * edge_length;
+                }
+            }
+        }
+        // Function boundaries
+        for bnd in &mesh.boundaries.function {
+            let iedges = &bnd.iedges;
+            let func = bnd.func;
+
+            for &iedge in iedges {
+                if let Status::Active(edge) = &mesh.edges[iedge] {
+                    let ielem = edge.parents[0];
+                    let elem = mesh.elements[ielem].as_ref();
+                    let u = solutions[(ielem, 0)];
+                    let local_id = edge.local_ids[0];
+                    let n0 = mesh.phys_nodes[elem.inodes[local_id]].as_ref();
+                    let n1 = mesh.phys_nodes[elem.inodes[(local_id + 1) % 3]].as_ref();
+                    let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
+                    let (mid_x, mid_y) = (0.5 * (n0.x + n1.x), 0.5 * (n0.y + n1.y));
+                    let bnd_value = func(mid_x, mid_y);
+                    let flux =
+                        self.compute_smoothed_boundary_flux(u, bnd_value, n0.x, n1.x, n0.y, n1.y);
+
+                    residuals[(ielem, 0)] += flux * edge_length;
+                }
+            }
+        }
+        // Polynomial boundaries
+        /*
+        for bnd in &mesh.boundaries.polynomial {
+            let iedges = &bnd.iedges;
+            let nodal_coeffs = &bnd.nodal_coeffs;
+            let n0_bnd = mesh.nodes[bnd.inodes[0]].as_ref();
+            let n1_bnd = mesh.nodes[bnd.inodes[1]].as_ref();
+            for &iedge in iedges {
+                if let Status::Active(edge) = &mesh.edges[iedge] {
+                    let ielem = edge.parents[0];
+                    let lelem = mesh.elements[ielem].as_ref();
+                    let u = solutions[(ielem, 0)];
+                    let local_id = edge.local_ids[0];
+                    let n0 = mesh.nodes[lelem.inodes[local_id]].as_ref();
+                    let n1 = mesh.nodes[lelem.inodes[(local_id + 1) % 3]].as_ref();
+                    let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
+                    let xi = array![0.5];
+                    let bnd_value = Self::compute_boundary_value_by_interpolation(
+                        &nodal_coeffs,
+                        self.basis().basis1d.n,
+                        &xi,
+                        &self.basis().basis1d.inv_vandermonde,
+                        n0.x,
+                        n1.x,
+                        n0.y,
+                        n1.y,
+                        n0_bnd.x,
+                        n1_bnd.x,
+                        n0_bnd.y,
+                        n1_bnd.y,
+                    );
+
+                    let flux = self.compute_boundary_flux(u, bnd_value[0], n0.x, n1.x, n0.y, n1.y);
+                    residuals[(ielem, 0)] += flux * edge_length;
+                }
+            }
+        }
+        */
+        // Open boundaries
+        for bnd in &mesh.boundaries.open {
+            let iedges = &bnd.iedges;
+            for &iedge in iedges {
+                if let Status::Active(edge) = &mesh.edges[iedge] {
+                    let ielem = edge.parents[0];
+                    let lelem = mesh.elements[ielem].as_ref();
+                    let u = solutions[(ielem, 0)];
+                    let local_id = edge.local_ids[0];
+                    let n0 = mesh.phys_nodes[lelem.inodes[local_id]].as_ref();
+                    let n1 = mesh.phys_nodes[lelem.inodes[(local_id + 1) % 3]].as_ref();
+                    let edge_length = ((n1.x - n0.x).powi(2) + (n1.y - n0.y).powi(2)).sqrt();
+                    let flux = self.compute_open_boundary_flux(u, n0.x, n1.x, n0.y, n1.y);
+                    residuals[(ielem, 0)] += flux * edge_length;
+                }
+            }
+        }
+    }
+    fn compute_time_steps(
+        &self,
+        mesh: &Mesh2d<TriangleElement>,
+        solutions: ArrayView2<f64>,
+    ) -> Array1<f64>;
 }

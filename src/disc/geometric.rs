@@ -98,42 +98,6 @@ pub trait Geometric2D {
 
         (jacob_det, jacob_inv_t)
     }
-    fn compute_distortion(x: &[f64], y: &[f64], basis: &TriangleBasis) -> f64 {
-        let dn_dxi = [
-            -1.0, // dN0/dξ
-            1.0,  // dN1/dξ
-            0.0,  // dN2/dξ
-        ];
-        let dn_deta = [
-            -1.0, // dN0/dη
-            0.0,  // dN1/dη
-            1.0,  // dN2/dη
-        ];
-        let mut distortion = 0.0;
-        for i in 0..basis.cub_xi.len() {
-            let _xi = basis.cub_xi[i];
-            let _eta = basis.cub_eta[i];
-
-            let mut dx_dxi = 0.0;
-            let mut dx_deta = 0.0;
-            let mut dy_dxi = 0.0;
-            let mut dy_deta = 0.0;
-
-            for k in 0..3 {
-                dx_dxi += dn_dxi[k] * x[k];
-                dx_deta += dn_deta[k] * x[k];
-                dy_dxi += dn_dxi[k] * y[k];
-                dy_deta += dn_deta[k] * y[k];
-            }
-
-            let jacob_det = dx_dxi * dy_deta - dx_deta * dy_dxi;
-            let jacobian = [dx_dxi, dx_deta, dy_dxi, dy_deta];
-
-            let jacobian_frobenius_norm = jacobian.iter().map(|x| x.powi(2)).sum::<f64>().sqrt();
-            distortion += basis.cub_w[i] * (jacobian_frobenius_norm.powi(2) / jacob_det).powi(2);
-        }
-        distortion
-    }
     fn compute_element_area(x: &[f64], y: &[f64]) -> f64 {
         // For triangular elements, assumes x and y are slices of length 3
         0.5 * ((x[1] - x[0]) * (y[2] - y[0]) - (x[2] - x[0]) * (y[1] - y[0])).abs()

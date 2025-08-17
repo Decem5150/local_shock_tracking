@@ -8,61 +8,63 @@ use super::{
 };
 use crate::{
     disc::{
-        P0Solver, SQP, SpaceTime1DScalar,
+        SpaceTime1DScalar,
         ader::{ADER1DMatrices, ADER1DScalarShockTracking},
         geometric::Geometric2D,
+        hoist::HOIST,
         mesh::mesh2d::Status,
+        space_time_1d_scalar::P0Solver,
     },
     solver::SolverParameters,
 };
 
 pub struct Disc1dBurgers1dSpaceTime<'a> {
     pub basis: TriangleBasis,
-    pub enriched_basis: TriangleBasis,
-    pub interp_node_to_cubature: Array2<f64>,
-    pub interp_node_to_enriched_cubature: Array2<f64>,
-    pub interp_node_to_enriched_quadrature: Array2<f64>,
+    pub enr_basis: TriangleBasis,
+    pub phi_q: Array2<f64>,       // Trial functions at cubature points
+    pub phi_qe: Array2<f64>,      // Trial functions at enriched cubature points
+    pub phi_edge_qe: Array2<f64>, // Trial functions at enriched quadrature points on edges
     // pub mesh: &'a mut Mesh2d<TriangleElement>,
     pub solver_param: &'a SolverParameters,
 }
 impl<'a> Disc1dBurgers1dSpaceTime<'a> {
     pub fn new(
         basis: TriangleBasis,
-        enriched_basis: TriangleBasis,
+        enr_basis: TriangleBasis,
         // mesh: &'a mut Mesh2d<TriangleElement>,
         solver_param: &'a SolverParameters,
     ) -> Self {
-        let interp_node_to_cubature = Self::compute_interp_matrix_2d(
+        let phi_q = Self::compute_interp_matrix_2d(
             solver_param.polynomial_order,
             basis.inv_vandermonde.view(),
             basis.cub_xi.view(),
             basis.cub_eta.view(),
         );
-        let interp_node_to_enriched_cubature = Self::compute_interp_matrix_2d(
+        let phi_qe = Self::compute_interp_matrix_2d(
             solver_param.polynomial_order,
             basis.inv_vandermonde.view(),
-            enriched_basis.cub_xi.view(),
-            enriched_basis.cub_eta.view(),
+            enr_basis.cub_xi.view(),
+            enr_basis.cub_eta.view(),
         );
         let gauss_lobatto_points = &basis.quad_p;
-        let enriched_gauss_lobatto_points = &enriched_basis.quad_p;
+        let enriched_gauss_lobatto_points = &enr_basis.quad_p;
         let inv_vandermonde_1d = TriangleBasis::vandermonde1d(
             solver_param.polynomial_order,
             gauss_lobatto_points.view(),
         )
         .inv()
         .unwrap();
-        let interp_node_to_enriched_quadrature = Self::compute_interp_matrix_1d(
+        let phi_edge_qe = Self::compute_interp_matrix_1d(
             solver_param.polynomial_order,
             inv_vandermonde_1d.view(),
             enriched_gauss_lobatto_points.view(),
         );
         Self {
             basis,
-            enriched_basis,
-            interp_node_to_cubature,
-            interp_node_to_enriched_cubature,
-            interp_node_to_enriched_quadrature,
+            enr_basis,
+            phi_q,
+            phi_qe,
+            phi_edge_qe,
             solver_param,
         }
     }
@@ -71,17 +73,17 @@ impl SpaceTime1DScalar for Disc1dBurgers1dSpaceTime<'_> {
     fn basis(&self) -> &TriangleBasis {
         &self.basis
     }
-    fn enriched_basis(&self) -> &TriangleBasis {
-        &self.enriched_basis
+    fn enr_basis(&self) -> &TriangleBasis {
+        &self.enr_basis
     }
-    fn interp_node_to_cubature(&self) -> &Array2<f64> {
-        &self.interp_node_to_cubature
+    fn phi_q(&self) -> &Array2<f64> {
+        &self.phi_q
     }
-    fn interp_node_to_enriched_cubature(&self) -> &Array2<f64> {
-        &self.interp_node_to_enriched_cubature
+    fn phi_qe(&self) -> &Array2<f64> {
+        &self.phi_qe
     }
-    fn interp_node_to_enriched_quadrature(&self) -> &Array2<f64> {
-        &self.interp_node_to_enriched_quadrature
+    fn phi_edge_qe(&self) -> &Array2<f64> {
+        &self.phi_edge_qe
     }
     /*
     fn mesh(&self) -> &Mesh2d<TriangleElement> {
@@ -136,8 +138,7 @@ impl SpaceTime1DScalar for Disc1dBurgers1dSpaceTime<'_> {
         let u_avg = 0.5 * (ul + ur);
         let beta = u_avg * nx + nt;
 
-        let result = 0.5 * (flux_l + flux_r + beta.abs() * (ul - ur));
-        result
+        0.5 * (flux_l + flux_r + beta.abs() * (ul - ur))
     }
     // #[autodiff_reverse(
     //     dnum_flux, Const, Active, Active, Active, Active, Active, Active, Active
@@ -166,8 +167,7 @@ impl SpaceTime1DScalar for Disc1dBurgers1dSpaceTime<'_> {
         // Smoothes Heaviside fuction:
         let alpha = 30.0;
         let heaviside = 1.0 / (1.0 + (-2.0 * alpha * beta).exp());
-        let result = flux_l * heaviside + flux_r * (1.0 - heaviside);
-        result
+        flux_l * heaviside + flux_r * (1.0 - heaviside)
     }
     /*
     fn compute_numerical_flux(&self, ul: f64, ur: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64 {
@@ -201,8 +201,7 @@ impl SpaceTime1DScalar for Disc1dBurgers1dSpaceTime<'_> {
         let u_avg = 0.5 * (u + ub);
         let beta = u_avg * nx + nt;
 
-        let result = 0.5 * (flux_l + flux_r + beta.abs() * (u - ub));
-        result
+        0.5 * (flux_l + flux_r + beta.abs() * (u - ub))
     }
     // #[autodiff_reverse(
     //     dbnd_flux, Const, Active, Const, Active, Active, Active, Active, Active
@@ -228,8 +227,7 @@ impl SpaceTime1DScalar for Disc1dBurgers1dSpaceTime<'_> {
 
         let alpha = 30.0;
         let heaviside = 1.0 / (1.0 + (-2.0 * alpha * beta).exp());
-        let result = flux_l * heaviside + flux_r * (1.0 - heaviside);
-        result
+        flux_l * heaviside + flux_r * (1.0 - heaviside)
     }
     /*
     fn compute_boundary_flux(&self, u: f64, ub: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64 {
@@ -301,7 +299,7 @@ impl SpaceTime1DScalar for Disc1dBurgers1dSpaceTime<'_> {
         y: &[f64],
     ) -> f64 {
         let f = self.physical_flux(u);
-        let (jacob_det, jacob_inv_t) = Self::evaluate_jacob(xi, eta, &x, &y);
+        let (jacob_det, jacob_inv_t) = Self::evaluate_jacob(xi, eta, x, y);
         let transformed_f = [
             jacob_det * (f[0] * jacob_inv_t[0] + f[1] * jacob_inv_t[2]),
             jacob_det * (f[0] * jacob_inv_t[1] + f[1] * jacob_inv_t[3]),
@@ -333,7 +331,7 @@ impl P0Solver for Disc1dBurgers1dSpaceTime<'_> {
         mesh: &Mesh2d<TriangleElement>,
         solutions: ArrayView2<f64>,
     ) -> Array1<f64> {
-        let nelem = mesh.elem_num;
+        let nelem = mesh.elements.len();
         let mut dts = Array1::zeros(nelem);
         let cfl = 0.5;
 
@@ -373,4 +371,4 @@ impl P0Solver for Disc1dBurgers1dSpaceTime<'_> {
 impl ADER1DMatrices for Disc1dBurgers1dSpaceTime<'_> {}
 impl ADER1DScalarShockTracking for Disc1dBurgers1dSpaceTime<'_> {}
 impl Geometric2D for Disc1dBurgers1dSpaceTime<'_> {}
-impl SQP for Disc1dBurgers1dSpaceTime<'_> {}
+impl HOIST for Disc1dBurgers1dSpaceTime<'_> {}

@@ -28,11 +28,11 @@ pub struct TriangleBasis {
 impl TriangleBasis {
     pub fn new(n: usize) -> Self {
         let (x, y) = Self::nodes2d(n);
-        println!("x: {:?}", x);
-        println!("y: {:?}", y);
+        println!("x: {x}");
+        println!("y: {y}");
         let (r, s) = Self::xy_to_rs(x.view(), y.view());
-        println!("r: {:?}", r);
-        println!("s: {:?}", s);
+        println!("r: {r}");
+        println!("s: {s}");
         let vandermonde = Self::vandermonde2d(n, r.view(), s.view());
         let inv_vandermonde = vandermonde.inv().unwrap();
         let (dr, ds) = Self::dmatrices_2d(n, r.view(), s.view(), vandermonde.view());
@@ -241,7 +241,7 @@ impl TriangleBasis {
         let mut pmat = Array2::<f64>::zeros((n + 1, nr));
         for i in 0..n + 1 {
             pmat.row_mut(i)
-                .assign(&Self::jacobi_polynomial(r.clone(), 0.0, 0.0, i as i32));
+                .assign(&Self::jacobi_polynomial(r, 0.0, 0.0, i as i32));
         }
         let mut lmat = Array2::zeros((veq.shape()[1], pmat.shape()[1]));
         for i in 0..pmat.shape()[1] {
@@ -253,8 +253,7 @@ impl TriangleBasis {
         let warp = lmat.t().dot(&(&lglr - &req));
         let zerof = r.mapv(|x| if x.abs() < 1.0 - 1.0e-10 { 1.0 } else { 0.0 });
         let sf = 1.0 - (&zerof * &r).mapv(|x| x.powi(2));
-        let warp = &warp / &sf + &warp * &(zerof - 1.0);
-        warp
+        &warp / &sf + &warp * &(zerof - 1.0)
     }
 
     fn xy_to_rs(x: ArrayView1<f64>, y: ArrayView1<f64>) -> (Array1<f64>, Array1<f64>) {
@@ -288,8 +287,8 @@ impl TriangleBasis {
             tmp = tmp - 0.5 * id as f64 * &gb * ((0.5 * (1.0 - &b)).powi(id - 1));
         }
         dmode_ds = dmode_ds + &fa * &tmp;
-        dmode_dr = dmode_dr * 2.0_f64.powf(id as f64 + 0.5);
-        dmode_ds = dmode_ds * 2.0_f64.powf(id as f64 + 0.5);
+        dmode_dr *= 2.0_f64.powf(id as f64 + 0.5);
+        dmode_ds *= 2.0_f64.powf(id as f64 + 0.5);
 
         (dmode_dr, dmode_ds)
     }

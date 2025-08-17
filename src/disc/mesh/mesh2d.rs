@@ -189,8 +189,6 @@ pub struct Mesh2d<T: Element2d> {
     pub free_bnd_x: Vec<usize>,
     pub free_bnd_y: Vec<usize>,
     pub interior_nodes: Vec<usize>,
-    pub elem_num: usize,
-    pub node_num: usize,
 }
 impl<T: Element2d> Mesh2d<T> {
     pub fn update_node_coords(
@@ -199,7 +197,7 @@ impl<T: Element2d> Mesh2d<T> {
         alpha: f64,
         delta_x: ArrayView1<f64>,
     ) {
-        let n_nodes = self.node_num;
+        let n_nodes = self.phys_nodes.len();
 
         for (new_idx, &delta_val) in delta_x.indexed_iter() {
             let old_dof_idx = new_to_old[new_idx];
@@ -219,7 +217,7 @@ impl<T: Element2d> Mesh2d<T> {
         }
     }
     pub fn rearrange_node_dofs(&self) -> Vec<usize> {
-        let n_nodes = self.node_num;
+        let n_nodes = self.phys_nodes.len();
 
         let num_interior = self.interior_nodes.len();
         let num_free_bnd_x = self.free_bnd_x.len();
@@ -657,8 +655,6 @@ impl Mesh2d<TriangleElement> {
             free_bnd_x,
             free_bnd_y,
             interior_nodes,
-            elem_num: 8,
-            node_num: 9,
         };
         mesh
     }
@@ -929,15 +925,14 @@ impl Mesh2d<TriangleElement> {
             free_bnd_x,
             free_bnd_y,
             interior_nodes,
-            elem_num,
-            node_num,
         }
     }
     pub fn collapse_small_elements(
         &mut self,
         min_area_ratio: f64,
         new_to_old_elem: &mut Vec<usize>,
-    ) {
+    ) -> bool {
+        let mut performed_collapse = false;
         loop {
             let mut element_to_collapse = None;
             let mut first_small_element_found = None;
@@ -969,10 +964,7 @@ impl Mesh2d<TriangleElement> {
                                 * (ref_nodes[1].y - ref_nodes[0].y));
                     // A negative area indicates different winding order, but its magnitude is what matters.
                     if phys_area <= 1e-12 {
-                        println!(
-                            "Found degenerate element: {}, area: {}",
-                            elem_idx, phys_area
-                        );
+                        println!("Found degenerate element: {elem_idx}, area: {phys_area}");
                         element_to_collapse = Some(elem_idx);
                         break; // Found a degenerate element, collapse it immediately.
                     }
@@ -986,8 +978,7 @@ impl Mesh2d<TriangleElement> {
                     };
                     if first_small_element_found.is_none() && area_ratio < min_area_ratio {
                         println!(
-                            "Found small element: {}, area ratio: {}, original area: {}, area: {}",
-                            elem_idx, area_ratio, ref_area, phys_area
+                            "Found small element: {elem_idx}, area ratio: {area_ratio}, original area: {ref_area}, area: {phys_area}"
                         );
                         first_small_element_found = Some(elem_idx);
                     }
@@ -1105,13 +1096,15 @@ impl Mesh2d<TriangleElement> {
                 };
 
                 // Perform the collapse and update tracking
-                println!("Collapsing edge from {} to {}...", v_from_idx, v_to_idx);
+                println!("Collapsing edge from {v_from_idx} to {v_to_idx}...");
                 self.perform_edge_collapse(v_from_idx, v_to_idx, new_to_old_elem);
-                println!("Collapsed edge from {} to {}", v_from_idx, v_to_idx);
+                println!("Collapsed edge from {v_from_idx} to {v_to_idx}.");
+                performed_collapse = true;
             } else {
                 break;
             }
         }
+        performed_collapse
     }
     fn perform_edge_collapse(
         &mut self,
@@ -1347,7 +1340,7 @@ impl Mesh2d<TriangleElement> {
         for &elem_idx in &elements_to_remove_vec {
             self.elements[elem_idx].mark_as_removed();
             new_to_old_elem.retain(|&i| i != elem_idx);
-            println!("Removed element: {}", elem_idx);
+            println!("Removed element: {elem_idx}");
         }
         let mut edges_to_remove_vec: Vec<usize> = edges_to_remove.iter().cloned().collect();
         edges_to_remove_vec.sort();
@@ -1365,7 +1358,7 @@ impl Mesh2d<TriangleElement> {
                 bnd.iedges.retain(|edge| !edges_to_remove.contains(edge));
             });
             self.edges[edge_idx].mark_as_removed();
-            println!("Removed edge: {}", edge_idx);
+            println!("Removed edge: {edge_idx}");
         }
         // Remove nodes from interior_nodes, free_bnd_x, free_bnd_y
         self.interior_nodes.retain(|&node| node != v_from_idx);

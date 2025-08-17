@@ -22,7 +22,7 @@ pub trait CGBasis2D {
     ) -> (Array2<f64>, Array2<f64>);
 
     /// Get the nodal coordinates on the reference element (optional, for interpolation)
-    fn cubature_points(n: usize) -> (Array1<f64>, Array1<f64>, Array1<f64>, Array1<f64>);
+    fn cubature_points(n: usize) -> (Array1<f64>, Array1<f64>, Array1<f64>);
 
     /// Get the number of nodes for polynomial order n
     fn num_nodes(n: usize) -> usize {

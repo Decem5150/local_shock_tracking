@@ -1,23 +1,19 @@
-#![feature(autodiff)]
-mod disc;
-mod initialization;
-mod io;
-mod solver;
 use std::f64::consts::PI;
 
+use local_shock_tracking::disc::hoist::HOIST;
 use ndarray::Array2;
 
-use crate::disc::dg_basis::lagrange1d::LobattoBasis;
-use crate::disc::dg_basis::quadrilateral::QuadrilateralBasis;
-use crate::disc::dg_basis::triangle::TriangleBasis;
-use crate::disc::boundary::scalar1d::burgers_bnd_condition_2;
-// use crate::disc::burgers1d::Disc1dBurgers;
-use crate::disc::burgers1d_space_time::Disc1dBurgers1dSpaceTime;
-use crate::disc::geometric::Geometric2D;
-use crate::disc::mesh::mesh2d::Mesh2d;
-use crate::disc::{SQP, space_time_1d_scalar::SpaceTime1DScalar};
-use crate::initialization::initialize_mesh1d;
-use crate::io::write_to_vtu::write_nodal_solutions;
+use local_shock_tracking::disc::boundary::scalar1d::burgers_bnd_condition_2;
+use local_shock_tracking::disc::dg_basis::lagrange1d::LobattoBasis;
+use local_shock_tracking::disc::dg_basis::quadrilateral::QuadrilateralBasis;
+use local_shock_tracking::disc::dg_basis::triangle::TriangleBasis;
+// use local_shock_tracking::disc::burgers1d::Disc1dBurgers;
+use local_shock_tracking::disc::burgers1d_space_time::Disc1dBurgers1dSpaceTime;
+use local_shock_tracking::disc::geometric::Geometric2D;
+use local_shock_tracking::disc::mesh::mesh2d::Mesh2d;
+use local_shock_tracking::disc::space_time_1d_scalar::SpaceTime1DScalar;
+use local_shock_tracking::initialization::{initialize_mesh1d, initialize_params};
+use local_shock_tracking::io::write_to_vtu::write_nodal_solutions;
 fn main() {
     /*
     let solver_params = initialization::initialize_params_by_file("inputs/solverparam.json");
@@ -46,7 +42,7 @@ fn main() {
     disc.initialize_solution(solutions.view_mut(), &|x| -(PI * x).sin());
     disc.solve(solutions.view_mut());
     */
-    let solver_params = initialization::initialize_params();
+    let solver_params = initialize_params();
     let basis = TriangleBasis::new(solver_params.polynomial_order);
     let enriched_basis = TriangleBasis::new(solver_params.polynomial_order + 1);
     let mut mesh =
@@ -56,7 +52,7 @@ fn main() {
     // dbg!(&burgers_bnd_condition_2(-0.2, 0.0));
     // dbg!(&burgers_bnd_condition_2(-0.5, 0.0));
     let disc = Disc1dBurgers1dSpaceTime::new(basis, enriched_basis, &solver_params);
-    let mut solutions = Array2::<f64>::zeros((mesh.elem_num, disc.basis.xi.len()));
+    let mut solutions = Array2::<f64>::zeros((mesh.elements.len(), disc.basis.xi.len()));
 
     disc.initialize_solution(solutions.view_mut());
     disc.solve(&mut mesh, &mut solutions);
